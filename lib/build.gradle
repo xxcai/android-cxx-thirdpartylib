@@ -1,0 +1,76 @@
+plugins {
+    id 'com.android.library'
+}
+
+android {
+    namespace 'com.thirdlib.thirdpartylib'
+    compileSdk rootProject.ext.compileSdk
+
+    defaultConfig {
+        minSdk rootProject.ext.minSdk
+        targetSdk rootProject.ext.targetSdk
+        ndkVersion rootProject.ext.ndkVersion
+
+        ndk {
+            abiFilters 'arm64-v8a'
+            //stl "c++_static"
+        }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags '-v'
+                arguments "-DANDROID_STL=c++_shared"
+                arguments("-DCMAKE_TOOLCHAIN_FILE=conan_android_toolchain.cmake")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path 'CMakeLists.txt'
+            version '3.22.1'
+        }
+    }
+
+    buildFeatures {
+        prefab true
+    }
+
+    prefab {
+        thirdpartylib {
+            headers 'src/main/cpp/include'
+        }
+    }
+}
+
+task conanInstall {
+    def conanExecutable = "conan" // define the path to your conan installation
+    ["Debug", "Release"].each { String build_type ->
+        ["armv7", "armv8"].each { String arch ->
+            def cmd = conanExecutable + " install " +
+                    ". --profile android.profile -s build_type="+ build_type +" -s arch=" + arch +
+                    " --build missing -c tools.cmake.cmake_layout:build_folder_vars=['settings.arch']"
+            print(">> ${cmd} \n")
+
+            def sout = new StringBuilder(), serr = new StringBuilder()
+            def proc = cmd.execute(null, projectDir)
+            proc.consumeProcessOutput(sout, serr)
+            proc.waitFor()
+            println "$sout $serr"
+            if (proc.exitValue() != 0) {
+                throw new Exception("out> $sout err> $serr" + "\nCommand: ${cmd}")
+            }
+        }
+    }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn("conanInstall")
+}

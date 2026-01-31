@@ -1,0 +1,7 @@
+{
+    "name": "thirdpartylib",
+    "schema_version": 2,
+    "dependencies": [
+        "zlib"
+    ]
+}
