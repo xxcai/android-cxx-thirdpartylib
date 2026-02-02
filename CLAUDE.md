@@ -121,7 +121,7 @@ prefab(NAME thirdpartylib
 ```bash
 # 1. 安装Conan依赖
 cd lib
-conan install . -if build --build=missing
+conan install . --build=missing
 
 # 2. 执行Gradle构建
 cd ..
