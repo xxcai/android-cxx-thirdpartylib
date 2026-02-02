@@ -2,8 +2,20 @@
 #include <string>
 #include <vector>
 #include <zlib.h>
+#include "include/thirdparty_lib.h"
 
 extern "C" {
+
+// 加法运算
+int add(int a, int b) {
+    return a + b;
+}
+
+// JNI包装 - 加法
+JNIEXPORT jint JNICALL
+Java_com_thirdlib_thirdpartylib_ThirdpartyLib_add(JNIEnv *env, jobject thiz, jint a, jint b) {
+    return add(a, b);
+}
 
 // 压缩数据
 JNIEXPORT jbyteArray JNICALL

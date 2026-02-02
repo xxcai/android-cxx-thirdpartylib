@@ -18,4 +18,12 @@ public class ThirdpartyLib {
      * @return 解压后的原始数据，失败返回null
      */
     public native byte[] decompress(byte[] compressedData);
+
+    /**
+     * 两个整数相加
+     * @param a 第一个加数
+     * @param b 第二个加数
+     * @return 相加结果
+     */
+    public native int add(int a, int b);
 }

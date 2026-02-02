@@ -41,12 +41,16 @@ android {
 
     buildFeatures {
         prefab true
+        prefabPublishing true
     }
 
     prefab {
         thirdpartylib {
             headers 'src/main/cpp/include'
         }
+//        zlib {
+//            headers 'build/armv8/zlib/include'
+//        }
     }
 }
 
