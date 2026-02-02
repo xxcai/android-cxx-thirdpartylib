@@ -15,6 +15,12 @@ public class MainActivity extends Activity {
     private ThirdpartyLib thirdpartyLib;
     private TextView textView;
 
+    static {
+        System.loadLibrary("app");
+    }
+
+    private native int nativeAdd(int a, int b);
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -22,16 +28,25 @@ public class MainActivity extends Activity {
 
         thirdpartyLib = new ThirdpartyLib();
         textView = findViewById(R.id.text_view);
-        Button btnCompress = findViewById(R.id.btn_compress);
-
         textView.setText("ThirdpartyLib loaded successfully!\n" +
                          "Package: " + ThirdpartyLib.class.getPackage().getName() + "\n" +
                          "Native library: thirdpartylib");
 
+        // 测试app java -> lib java -> lib native
+        Button btnCompress = findViewById(R.id.btn_compress);
         btnCompress.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 testCompression();
+            }
+        });
+
+        // 测试app java -> app native -> lib native
+        Button btnAdd = findViewById(R.id.btn_add);
+        btnAdd.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                testNativeAdd();
             }
         });
     }
@@ -49,6 +64,21 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
                 Log.e(TAG, msg);
             }
+        } catch (Exception e) {
+            String msg = "Error: " + e.getMessage();
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            Log.e(TAG, msg);
+        }
+    }
+
+    private void testNativeAdd() {
+        try {
+            int a = 10;
+            int b = 20;
+            int result = nativeAdd(a, b);
+            String msg = "Native add: " + a + " + " + b + " = " + result;
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            Log.i(TAG, msg);
         } catch (Exception e) {
             String msg = "Error: " + e.getMessage();
             Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
