@@ -47,7 +47,7 @@ android {
 
     prefab {
         thirdpartylib {
-            headers 'src/main/cpp/include'
+            headers '.cxx/include'
         }
 //        zlib {
 //            headers 'build/armv8/zlib/include'
@@ -141,6 +141,9 @@ def collectIncludeDirs(String build_type, String arch) {
                             println ">> Found include dir for ${packageName}: ${includeDir.absolutePath}"
                         }
                     }
+                    if (includeDirs) {
+                        conanIncludeDirsMap[packageName] = includeDirs
+                    }
                 }
             }
         }
@@ -173,6 +176,34 @@ task conanInstall {
             println ">>   ${packageName}:"
             dirs.each { println ">>     ${it}" }
         }
+
+        // 将收集到的头文件复制到 .cxx/headers 目录
+        def headersDir = new File(projectDir, ".cxx/include")
+        headersDir.mkdirs()
+
+        conanIncludeDirsMap.each { packageName, dirs ->
+            dirs.each { includePath ->
+                def srcDir = new File(includePath)
+                def destDir = new File(headersDir, packageName)
+                copy {
+                    from srcDir
+                    into destDir
+                    include '**/*.h'
+                }
+            }
+        }
+
+        // 拷贝项目自身的头文件到 include 根目录
+        def ownHeadersDir = new File(projectDir, "src/main/cpp/include")
+        if (ownHeadersDir.exists()) {
+            copy {
+                from ownHeadersDir
+                into headersDir
+                include '**/*.h'
+            }
+        }
+
+        println ">> Headers copied to: ${headersDir.absolutePath}"
     }
 }
 
