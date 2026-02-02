@@ -1,5 +1,6 @@
 plugins {
     id 'com.android.library'
+    id 'maven-publish'
 }
 
 android {
@@ -51,6 +52,10 @@ android {
 //        zlib {
 //            headers 'build/armv8/zlib/include'
 //        }
+    }
+
+    publishing {
+        singleVariant("release")
     }
 }
 
@@ -169,3 +174,45 @@ task conanInstall {
 tasks.named("preBuild").configure {
     dependsOn("conanInstall")
 }
+
+// Maven发布配置
+publishing {
+    publications {
+        release(MavenPublication) {
+            afterEvaluate {
+                from components.release
+            }
+
+            groupId = 'com.thirdlib'
+            artifactId = 'thirdpartylib'
+            version = '1.0.0'
+
+            pom {
+                name = 'thirdpartylib'
+                description = 'Android C++ Thirdparty Library with Prefab support'
+                url = 'https://github.com/example/thirdpartylib'
+                licenses {
+                    license {
+                        name = 'MIT'
+                        url = 'https://opensource.org/licenses/MIT'
+                    }
+                }
+                developers {
+                    developer {
+                        id = 'developer'
+                        name = 'Developer'
+                        email = 'developer@example.com'
+                    }
+                }
+            }
+        }
+    }
+
+    repositories {
+        maven {
+            // 本地Maven仓库路径
+            url = uri("${rootDir}/local-maven-repo")
+        }
+    }
+}
+

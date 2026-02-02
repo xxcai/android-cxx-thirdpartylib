@@ -42,6 +42,12 @@ android {
     }
 }
 
+repositories {
+    maven {
+        url = uri("${rootDir}/../local-maven-repo")
+    }
+}
+
 dependencies {
-    implementation project(':lib')
+    implementation 'com.thirdlib:thirdpartylib:1.0.0'
 }
