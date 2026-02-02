@@ -54,24 +54,115 @@ android {
     }
 }
 
-task conanInstall {
-    def conanExecutable = "conan" // define the path to your conan installation
-    ["Debug", "Release"].each { String build_type ->
-        ["armv7", "armv8"].each { String arch ->
-            def cmd = conanExecutable + " install " +
-                    ". --profile android.profile -s build_type="+ build_type +" -s arch=" + arch +
-                    " --build missing -c tools.cmake.cmake_layout:build_folder_vars=['settings.arch']"
-            print(">> ${cmd} \n")
+// arch映射：AGP ABI -> Conan arch
+ext.abiToConanArch = [
+    'arm64-v8a': 'armv8',
+    'armeabi-v7a': 'armv7',
+    'x86_64': 'x86_64',
+    'x86': 'x86'
+]
 
-            def sout = new StringBuilder(), serr = new StringBuilder()
-            def proc = cmd.execute(null, projectDir)
-            proc.consumeProcessOutput(sout, serr)
-            proc.waitFor()
-            println "$sout $serr"
-            if (proc.exitValue() != 0) {
-                throw new Exception("out> $sout err> $serr" + "\nCommand: ${cmd}")
+// 存储include目录的全局列表
+ext.conanIncludeDirs = []
+
+// 方法1：执行conan install
+def executeConanInstall(String build_type, String arch) {
+    def conanExecutable = "conan"
+    def cmd = conanExecutable + " install " +
+              ". --profile android.profile -s build_type=" + build_type + " -s arch=" + arch +
+              " --build missing -c tools.cmake.cmake_layout:build_folder_vars=['settings.arch']"
+    print(">> ${cmd} \n")
+
+    def sout = new StringBuilder(), serr = new StringBuilder()
+    def proc = cmd.execute(null, projectDir)
+    proc.consumeProcessOutput(sout, serr)
+    proc.waitFor()
+    println "$sout $serr"
+    if (proc.exitValue() != 0) {
+        throw new Exception("out> $sout err> $serr" + "\nCommand: ${cmd}")
+    }
+}
+
+// 方法2：执行conan graph info并收集include目录
+def collectIncludeDirs(String build_type, String arch) {
+    def cmd = "conan graph info . --profile android.profile " +
+              "-s build_type=${build_type} -s arch=${arch} --format=json"
+    println ">> ${cmd}"
+
+    def sout = new StringBuilder(), serr = new StringBuilder()
+    def proc = cmd.execute(null, projectDir)
+    proc.consumeProcessOutput(sout, serr)
+    proc.waitFor()
+
+    if (proc.exitValue() != 0) {
+        throw new Exception("conan graph info failed: ${serr}")
+    }
+
+    // 解析JSON
+    def jsonSlurper = new groovy.json.JsonSlurper()
+    def graphInfo = jsonSlurper.parseText(sout.toString())
+    def nodes = graphInfo.graph.nodes
+
+    // 遍历节点，找到有package_id的非CLI节点
+    nodes.each { id, node ->
+        def packageId = node.package_id
+        def recipe = node.recipe
+
+        // 跳过CLI节点（recipe为Cli或Consumer）
+        if (packageId && recipe != 'Cli' && recipe != 'Consumer') {
+            def ref = node.ref.split('#')[0]  // 去掉revision，如 "zlib/1.3.1#xxx" -> "zlib/1.3.1"
+
+            // 使用conan cache path获取包路径
+            def cacheCmd = "conan cache path ${ref}:${packageId}"
+            println ">> ${cacheCmd}"
+
+            def cacheSout = new StringBuilder(), cacheSerr = new StringBuilder()
+            def cacheProc = cacheCmd.execute(null, projectDir)
+            cacheProc.consumeProcessOutput(cacheSout, cacheSerr)
+            cacheProc.waitFor()
+
+            if (cacheProc.exitValue() == 0) {
+                def packageFolder = cacheSout.toString().trim()
+
+                // 从cpp_info.root.includedirs获取相对路径
+                def includedirs = node.cpp_info?.root?.includedirs
+                if (includedirs) {
+                    includedirs.each { relativePath ->
+                        def includeDir = new File(packageFolder, relativePath)
+                        if (includeDir.exists()) {
+                            conanIncludeDirs << includeDir.absolutePath
+                            println ">> Found include dir: ${includeDir.absolutePath}"
+                        }
+                    }
+                }
             }
         }
+    }
+}
+
+task conanInstall {
+    // 从AGP配置读取abiFilters，默认['arm64-v8a']
+    def abiFilters = android.defaultConfig.ndk.abiFilters ?: ['arm64-v8a']
+
+    doLast {
+        ["Debug", "Release"].each { String buildType ->
+            abiFilters.each { String abi ->
+                def arch = abiToConanArch[abi]
+                if (!arch) {
+                    throw new Exception("Unknown ABI: ${abi}")
+                }
+
+                executeConanInstall(buildType, arch)
+
+                // 只在第一个ABI时收集include目录（避免重复）
+                if (abi == abiFilters[0]) {
+                    collectIncludeDirs(buildType, arch)
+                }
+            }
+        }
+        // 打印最终结果
+        println ">> Collected include directories:"
+        conanIncludeDirs.each { println ">>   ${it}" }
     }
 }
 
