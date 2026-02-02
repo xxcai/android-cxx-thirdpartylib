@@ -145,7 +145,7 @@ task conanInstall {
     def abiFilters = android.defaultConfig.ndk.abiFilters ?: ['arm64-v8a']
 
     doLast {
-        ["Debug", "Release"].each { String buildType ->
+        ["Debug", "Release", "RelWithDebInfo"].each { String buildType ->
             abiFilters.each { String abi ->
                 def arch = abiToConanArch[abi]
                 if (!arch) {
