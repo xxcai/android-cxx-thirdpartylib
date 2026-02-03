@@ -40,20 +40,6 @@ android {
         }
     }
 
-    buildFeatures {
-        prefab true
-        prefabPublishing true
-    }
-
-    prefab {
-        thirdpartylib {
-            headers '.cxx/include'
-        }
-//        zlib {
-//            headers 'build/armv8/zlib/include'
-//        }
-    }
-
     publishing {
         singleVariant("release")
     }
@@ -209,6 +195,344 @@ task conanInstall {
 
 tasks.named("preBuild").configure {
     dependsOn("conanInstall")
+}
+
+// ============================================================
+// 手动Prefab相关配置
+// ============================================================
+
+// 存储conan包的package folder路径
+ext.conanPackageFoldersMap = [:]
+
+// 从conan graph info收集package folder路径
+def collectPackageFolders(String build_type, String arch) {
+    def cmd = "conan graph info . --profile android.profile " +
+              "-s build_type=${build_type} -s arch=${arch} --format=json"
+    println ">> collectPackageFolders: ${cmd}"
+
+    def sout = new StringBuilder(), serr = new StringBuilder()
+    def proc = cmd.execute(null, projectDir)
+    proc.consumeProcessOutput(sout, serr)
+    proc.waitFor()
+
+    if (proc.exitValue() != 0) {
+        throw new Exception("conan graph info failed: ${serr}")
+    }
+
+    def jsonSlurper = new groovy.json.JsonSlurper()
+    def graphInfo = jsonSlurper.parseText(sout.toString())
+    def nodes = graphInfo.graph.nodes
+
+    nodes.each { id, node ->
+        def packageId = node.package_id
+        def recipe = node.recipe
+
+        if (packageId && recipe != 'Cli' && recipe != 'Consumer') {
+            def ref = node.ref.split('#')[0]
+            def packageName = ref.split('/')[0].toLowerCase()
+
+            // 使用conan cache path获取包路径
+            def cacheCmd = "conan cache path ${ref}:${packageId}"
+            def cacheSout = new StringBuilder(), cacheSerr = new StringBuilder()
+            def cacheProc = cacheCmd.execute(null, projectDir)
+            cacheProc.consumeProcessOutput(cacheSout, cacheSerr)
+            cacheProc.waitFor()
+
+            if (cacheProc.exitValue() == 0) {
+                def packageFolder = cacheSout.toString().trim()
+                conanPackageFoldersMap[packageName] = packageFolder
+                println ">> Package folder for ${packageName}: ${packageFolder}"
+            }
+        }
+    }
+}
+
+// 在conanInstall中收集package folders
+// 在原始conanInstall task之后添加收集逻辑
+def conanInstallTask = tasks.getByName('conanInstall')
+conanInstallTask.finalizedBy tasks.register('collectPackageFoldersTask') {
+    doLast {
+        ["Release"].each { buildType ->
+            ["arm64-v8a"].each { abi ->
+                def arch = abiToConanArch[abi]
+                collectPackageFolders(buildType, arch)
+            }
+        }
+    }
+}
+
+// 生成prefab.json
+def generatePrefabJson(def buildDir) {
+    def prefabJson = new File(buildDir, "prefab.json")
+    prefabJson.text = """
+{
+    "schema_version": 1,
+    "name": "thirdpartylib",
+    "dependencies": ["zlib"]
+}
+"""
+    return prefabJson
+}
+
+// 生成modules.json
+def generateModulesJson(def modulesDir) {
+    def modulesJson = new File(modulesDir, "modules.json")
+    modulesJson.text = """
+{
+    "modules": [
+        {"name": "thirdpartylib"},
+        {"name": "zlib"}
+    ]
+}
+"""
+    return modulesJson
+}
+
+// 生成thirdpartylib/library.json
+def generateThirdpartyLibJson(def moduleDir) {
+    def libJson = new File(moduleDir, "library.json")
+    libJson.text = """
+{
+    "schema_version": 2,
+    "name": "thirdpartylib",
+    "dependencies": ["zlib"],
+    "library_name": "thirdpartylib",
+    "library": "libs/android.arm64-v8a/libthirdpartylib.so"
+}
+"""
+    return libJson
+}
+
+// 生成zlib/library.json
+def generateZlibJson(def moduleDir) {
+    def libJson = new File(moduleDir, "library.json")
+    libJson.text = """
+{
+    "schema_version": 2,
+    "name": "zlib",
+    "headers": "include",
+    "library_name": "z",
+    "library": "libs/android.arm64-v8a/libz.so"
+}
+"""
+    return libJson
+}
+
+// 查找库文件
+def findLibraryFile(def buildDir, String variant, String abi, String libName) {
+    // 搜索可能的路径
+    def searchPaths = [
+        new File(buildDir, "intermediates/cxx/${variant}/"),
+        new File(buildDir, "intermediates/merged_native_libs/${variant.toLowerCase()}/"),
+        new File(buildDir, "intermediates/stripped_native_libs/${variant.toLowerCase()}/"),
+        new File(buildDir, "intermediates/library_and_local_jars_jni/${variant.toLowerCase()}/"),
+    ]
+
+    for (def path : searchPaths) {
+        if (path.exists()) {
+            def result = findFileRecursively(path, libName)
+            if (result) {
+                return result
+            }
+        }
+    }
+    return null
+}
+
+def findFileRecursively(File dir, String fileName) {
+    if (!dir.exists() || !dir.isDirectory()) return null
+
+    def children = dir.listFiles()
+    if (children == null) return null
+
+    for (File child : children) {
+        if (child.name == fileName) {
+            return child
+        }
+        if (child.isDirectory()) {
+            def result = findFileRecursively(child, fileName)
+            if (result) return result
+        }
+    }
+    return null
+}
+
+// 自定义Task: assemblePrefab
+task assemblePrefab {
+    group = "build"
+    description = "Assemble prefab directory structure for AAR"
+
+    dependsOn 'conanInstall'
+    dependsOn 'collectPackageFoldersTask'
+
+    doLast {
+        def variant = "Release"
+        def abi = "arm64-v8a"
+
+        // 构建输出目录
+        def buildDir = layout.buildDirectory.get().asFile
+        def prefabDir = new File(buildDir, "intermediates/prefab/${variant}")
+        def modulesDir = new File(prefabDir, "modules")
+        def jniDir = new File(buildDir, "intermediates/jni/${variant}/${abi}")
+
+        // 创建目录结构
+        prefabDir.mkdirs()
+        modulesDir.mkdirs()
+        jniDir.mkdirs()
+
+        println ">> assemblePrefab: prefabDir=${prefabDir}"
+
+        // 1. 复制zlib头文件
+        def zlibPackageFolder = conanPackageFoldersMap['zlib']
+        if (zlibPackageFolder) {
+            def zlibIncludeSrc = new File(zlibPackageFolder, "include")
+            def zlibIncludeDest = new File(modulesDir, "zlib/include")
+            if (zlibIncludeSrc.exists()) {
+                copy {
+                    from zlibIncludeSrc
+                    into zlibIncludeDest
+                    include '**/*.h'
+                }
+                println ">> Copied zlib headers to ${zlibIncludeDest}"
+            }
+
+            // 2. 复制zlib库文件
+            def zlibLibSrc = new File(zlibPackageFolder, "lib")
+            if (zlibLibSrc.exists()) {
+                copy {
+                    from zlibLibSrc
+                    into jniDir
+                    include 'libz.so'
+                }
+                println ">> Copied zlib lib to ${jniDir}"
+            }
+        }
+
+        // 3. 复制libthirdpartylib.so
+        // AGP生成的路径: intermediates/cxx/RelWithDebInfo/xxx/obj/arm64-v8a/
+        def thirdpartyLibSo = findLibraryFile(buildDir, variant, abi, "libthirdpartylib.so")
+        if (thirdpartyLibSo) {
+            copy {
+                from thirdpartyLibSo
+                into jniDir
+            }
+            println ">> Copied libthirdpartylib.so to ${jniDir}"
+        } else {
+            println ">> Warning: libthirdpartylib.so not found"
+        }
+
+        // 5. 复制zlib.so (从mergeReleaseNativeLibs获取)
+        def zlibSo = findLibraryFile(buildDir, variant, abi, "libz.so")
+        if (zlibSo && !new File(jniDir, "libz.so").exists()) {
+            copy {
+                from zlibSo
+                into jniDir
+            }
+            println ">> Copied libz.so to ${jniDir}"
+        }
+
+        // 6. 创建Prefab模块目录变量
+        def thirdpartyLibModuleDir = new File(modulesDir, "thirdpartylib")
+        def zlibModuleDir = new File(modulesDir, "zlib")
+
+        // 7. 复制so到Prefab模块的libs目录
+
+        // 复制libthirdpartylib.so到thirdpartylib模块的libs目录
+        def thirdpartyLibSoForPrefab = findLibraryFile(buildDir, variant, abi, "libthirdpartylib.so")
+        if (thirdpartyLibSoForPrefab) {
+            def libDir = new File(thirdpartyLibModuleDir, "libs/android.${abi}")
+            libDir.mkdirs()
+            copy {
+                from thirdpartyLibSoForPrefab
+                into libDir
+            }
+            println ">> Copied libthirdpartylib.so to Prefab libs: ${libDir}"
+        }
+
+        // 复制zlib.so到zlib模块的libs目录
+        def zlibSoForPrefab = findLibraryFile(buildDir, variant, abi, "libz.so")
+        if (zlibSoForPrefab) {
+            def libDir = new File(zlibModuleDir, "libs/android.${abi}")
+            libDir.mkdirs()
+            copy {
+                from zlibSoForPrefab
+                into libDir
+            }
+            println ">> Copied libz.so to Prefab libs: ${libDir}"
+        }
+
+        // 8. 生成Prefab配置文件
+        generatePrefabJson(prefabDir)
+        generateModulesJson(modulesDir)
+
+        // 确保模块目录存在并生成library.json
+        thirdpartyLibModuleDir.mkdirs()
+        generateThirdpartyLibJson(thirdpartyLibModuleDir)
+
+        // zlib/include已存在，确保zlib模块目录存在
+        zlibModuleDir.mkdirs()
+        generateZlibJson(zlibModuleDir)
+
+        // 9. 复制lib自己的头文件到thirdpartylib/include
+        def ownHeadersSrc = new File(projectDir, "src/main/cpp/include")
+        def ownHeadersDest = new File(thirdpartyLibModuleDir, "include")
+        if (ownHeadersSrc.exists()) {
+            ownHeadersDest.mkdirs()
+            copy {
+                from ownHeadersSrc
+                into ownHeadersDest
+                include '**/*.h'
+            }
+            println ">> Copied own headers to ${ownHeadersDest}"
+        }
+
+        println ">> Prefab assembled at: ${prefabDir.absolutePath}"
+    }
+}
+
+// 拦截AAR打包，注入prefab目录
+afterEvaluate {
+    // AGP 8.x 使用 bundleReleaseAar 任务名，创建的是zip文件
+    def packageTask = tasks.find { it.name == 'bundleReleaseAar' }
+    if (packageTask) {
+        packageTask.dependsOn assemblePrefab
+
+        packageTask.doLast {
+            // bundleReleaseAar 创建的是zip文件
+            def aarFile = new File(buildDir, "outputs/aar/lib-release.aar")
+            def prefabDir = layout.buildDirectory.dir("intermediates/prefab/Release").get().asFile
+
+            if (prefabDir.exists() && aarFile.exists()) {
+                // 1. 创建临时目录解压AAR
+                def tempDir = new File(buildDir, "intermediates/aar_temp")
+                delete tempDir
+                tempDir.mkdirs()
+
+                // 2. 解压AAR到临时目录
+                copy {
+                    from zipTree(aarFile)
+                    into tempDir
+                }
+
+                // 3. 将prefab目录复制到AAR内容目录
+                copy {
+                    from prefabDir
+                    into new File(tempDir, "prefab")
+                }
+
+                // 4. 删除旧的AAR
+                delete aarFile
+
+                // 5. 重新打包AAR
+                ant.zip(destfile: aarFile.absolutePath, basedir: tempDir.absolutePath)
+
+                // 6. 清理临时目录
+                delete tempDir
+
+                println ">> Injected prefab into AAR: ${aarFile}"
+            }
+        }
+    }
 }
 
 // Maven发布配置
