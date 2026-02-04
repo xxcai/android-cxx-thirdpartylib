@@ -49,5 +49,6 @@ repositories {
 }
 
 dependencies {
+    // 引入thirdpartylib包（包含thirdpartylib和zlib两个prefab模块）
     implementation 'com.thirdlib:thirdpartylib:1.0.0'
 }

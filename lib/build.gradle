@@ -406,7 +406,8 @@ task assemblePrefab {
         }
 
         // 3. 生成thirdpartylib/module.json
-        generateModuleJson(thirdpartyModuleDir, "thirdpartylib", [":zlib"])
+        // 注意：library_name需要包含lib前缀，因为Prefab CLI 2.0.0的bug不会自动添加
+        generateModuleJson(thirdpartyModuleDir, "libthirdpartylib", [":zlib"])
 
         // 4. 生成thirdpartylib/abi.json
         def thirdpartyLibDir = new File(thirdpartyModuleDir, "libs/android.${abi}")
@@ -458,7 +459,8 @@ task assemblePrefab {
         }
 
         // 7. 生成zlib/module.json
-        generateModuleJson(zlibModuleDir, "z", [])
+        // 注意：library_name需要包含lib前缀
+        generateModuleJson(zlibModuleDir, "libz", [])
 
         // 8. 生成zlib/abi.json
         def zlibLibDir = new File(zlibModuleDir, "libs/android.${abi}")

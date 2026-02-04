@@ -20,6 +20,8 @@ public class MainActivity extends Activity {
     }
 
     private native int nativeAdd(int a, int b);
+    private native String nativeTestZlib(String input);
+    private native String nativeTestZlibDecompress(String input);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -47,6 +49,15 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 testNativeAdd();
+            }
+        });
+
+        // 测试app native直接调用zlib
+        Button btnZlib = findViewById(R.id.btn_zlib);
+        btnZlib.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                testZlib();
             }
         });
     }
@@ -79,6 +90,20 @@ public class MainActivity extends Activity {
             String msg = "Native add: " + a + " + " + b + " = " + result;
             Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
             Log.i(TAG, msg);
+        } catch (Exception e) {
+            String msg = "Error: " + e.getMessage();
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            Log.e(TAG, msg);
+        }
+    }
+
+    // 测试app native直接调用zlib（通过prefab引入）
+    private void testZlib() {
+        try {
+            String input = "Hello, Zlib! This is a test message for zlib compression.";
+            String result = nativeTestZlib(input);
+            Toast.makeText(this, "Zlib test: " + result, Toast.LENGTH_SHORT).show();
+            Log.i(TAG, "Zlib test: " + result);
         } catch (Exception e) {
             String msg = "Error: " + e.getMessage();
             Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();

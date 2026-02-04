@@ -25,4 +25,11 @@
         android:layout_marginTop="16dp"
         android:text="Test Native Add" />
 
+    <Button
+        android:id="@+id/btn_zlib"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Test Zlib (Prefab)" />
+
 </LinearLayout>
