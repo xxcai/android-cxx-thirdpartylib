@@ -347,6 +347,90 @@ def findFileRecursively(File dir, String fileName) {
     return null
 }
 
+// ==================== 通用的Prefab模块生成方法 ====================
+
+// 解析 conanfile.txt 获取依赖列表
+def parseConanfileTxt(File conanfile) {
+    def deps = []
+    def inRequires = false
+    conanfile.eachLine { line ->
+        def trimmed = line.trim()
+        if (trimmed.startsWith('[requires]')) {
+            inRequires = true
+        } else if (trimmed.startsWith('[')) {
+            inRequires = false
+        } else if (inRequires && trimmed) {
+            def pkg = trimmed.split('/')[0]
+            if (!deps.contains(pkg)) {
+                deps << pkg
+            }
+        }
+    }
+    return deps
+}
+
+// 针对每个依赖生成 prefab 模块
+def generatePrefabModule(String packageName, String abi, String variant, File modulesDir) {
+    def packageFolder = conanPackageFoldersMap[packageName]
+    if (!packageFolder) {
+        println ">> Warning: ${packageName} package folder not found"
+        return
+    }
+
+    def moduleDir = new File(modulesDir, packageName)
+    def libsDir = new File(moduleDir, "libs/android.${abi}")
+
+    println ">> Generating prefab module: ${packageName}"
+
+    // 1. 复制头文件
+    def includeSrc = new File(packageFolder, "include")
+    if (includeSrc.exists()) {
+        def includeDest = new File(moduleDir, "include")
+        includeDest.mkdirs()
+        copy {
+            from includeSrc
+            into includeDest
+            include '**/*.h'
+        }
+        println ">>   Copied headers: ${includeSrc}"
+    }
+
+    // 2. 复制库文件 (.so 或 .a)
+    def libSrc = new File(packageFolder, "lib")
+    if (libSrc.exists() && libSrc.listFiles()) {
+        libsDir.mkdirs()
+        libSrc.eachFile { file ->
+            if (file.name.endsWith('.so') || file.name.endsWith('.a')) {
+                copy {
+                    from file
+                    into libsDir
+                }
+                println ">>   Copied library: ${file.name}"
+            }
+        }
+    }
+
+    // 3. 确定 library_name
+    def libraryName = "lib${packageName}"
+    if (libsDir.exists()) {
+        def libFile = libsDir.listFiles().find { it.name.endsWith('.so') || it.name.endsWith('.a') }
+        if (libFile) {
+            libraryName = libFile.name.replaceAll(/\.(so|a)$/, '')
+        }
+    }
+    generateModuleJson(moduleDir, libraryName, [])
+
+    // 4. 生成 abi.json
+    def minSdk = android.defaultConfig.minSdk ?: 21
+    def ndkVersion = project.hasProperty('ndkVersion') ? ndkVersion : "25.1.8937393"
+    def ndkMajor = ndkVersion.split('\\.')[0].toInteger()
+    def stl = "c++_shared"
+    def libFile = libsDir.listFiles()?.find { it.name.endsWith('.so') || it.name.endsWith('.a') }
+    def isStatic = libFile?.name?.endsWith('.a') ?: false
+    generateAbiJson(libsDir, abi, minSdk, ndkMajor, stl, isStatic)
+    println ">>   Generated module.json and abi.json"
+}
+
 // 自定义Task: assemblePrefab
 task assemblePrefab {
     group = "build"
@@ -354,31 +438,26 @@ task assemblePrefab {
 
     dependsOn 'conanInstall'
     dependsOn 'collectPackageFoldersTask'
-    dependsOn 'externalNativeBuildRelease'  // 确保CMake构建完成
+    dependsOn 'externalNativeBuildRelease'
 
     doLast {
         def variant = "Release"
         def abi = "arm64-v8a"
 
-        // 构建输出目录
         def buildDir = layout.buildDirectory.get().asFile
         def prefabDir = new File(buildDir, "intermediates/prefab/${variant}")
         def modulesDir = new File(prefabDir, "modules")
 
-        // 创建Prefab模块目录
-        def thirdpartyModuleDir = new File(modulesDir, "thirdpartylib")
-        def zlibModuleDir = new File(modulesDir, "zlib")
-
-        // 创建目录结构
         prefabDir.mkdirs()
         modulesDir.mkdirs()
-        thirdpartyModuleDir.mkdirs()
-        zlibModuleDir.mkdirs()
 
         println ">> assemblePrefab: prefabDir=${prefabDir}"
 
-        // ==================== thirdpartylib 模块 ====================
-        // 1. 复制libthirdpartylib.so到模块的libs目录
+        // ==================== thirdparty 模块 ====================
+        def thirdpartyModuleDir = new File(modulesDir, "thirdpartylib")
+        thirdpartyModuleDir.mkdirs()
+
+        // 1. 复制 libthirdpartylib.so
         def thirdpartyLibSo = findLibraryFile(buildDir, abi, "libthirdpartylib.so")
         if (thirdpartyLibSo) {
             def libDir = new File(thirdpartyModuleDir, "libs/android.${abi}")
@@ -387,12 +466,10 @@ task assemblePrefab {
                 from thirdpartyLibSo
                 into libDir
             }
-            println ">> Copied libthirdpartylib.so to Prefab libs: ${libDir}"
-        } else {
-            println ">> Warning: libthirdpartylib.so not found"
+            println ">> Copied libthirdpartylib.so"
         }
 
-        // 2. 复制lib自己的头文件到thirdpartylib/include
+        // 2. 复制自己的头文件
         def ownHeadersSrc = new File(projectDir, "src/main/cpp/include")
         def ownHeadersDest = new File(thirdpartyModuleDir, "include")
         if (ownHeadersSrc.exists()) {
@@ -402,152 +479,34 @@ task assemblePrefab {
                 into ownHeadersDest
                 include '**/*.h'
             }
-            println ">> Copied own headers to ${ownHeadersDest}"
         }
 
-        // 3. 生成thirdpartylib/module.json
-        // 注意：library_name需要包含lib前缀，因为Prefab CLI 2.0.0的bug不会自动添加
-        // 添加zlib和openssl依赖
-        generateModuleJson(thirdpartyModuleDir, "libthirdpartylib", [":zlib", ":openssl"])
+        // 3. 从 conanfile.txt 读取依赖
+        def conanfileTxt = new File(projectDir, "conanfile.txt")
+        def dependencies = parseConanfileTxt(conanfileTxt)
+        println ">> Dependencies from conanfile.txt: ${dependencies}"
 
-        // 4. 生成thirdpartylib/abi.json
+        // 4. 生成 thirdparty/module.json，添加依赖
+        generateModuleJson(thirdpartyModuleDir, "libthirdpartylib", dependencies.collect { ":${it}" })
+
+        // 5. 生成 thirdparty/abi.json
         def thirdpartyLibDir = new File(thirdpartyModuleDir, "libs/android.${abi}")
         if (thirdpartyLibDir.exists()) {
             def minSdk = android.defaultConfig.minSdk ?: 21
             def ndkVersion = project.hasProperty('ndkVersion') ? ndkVersion : "25.1.8937393"
             def ndkMajor = ndkVersion.split('\\.')[0].toInteger()
             def stl = "c++_shared"
-
-            def libFile = thirdpartyLibDir.listFiles().find { it.name.endsWith('.so') || it.name.endsWith('.a') }
+            def libFile = thirdpartyLibDir.listFiles()?.find { it.name.endsWith('.so') || it.name.endsWith('.a') }
             def isStatic = libFile?.name?.endsWith('.a') ?: false
-
             generateAbiJson(thirdpartyLibDir, abi, minSdk, ndkMajor, stl, isStatic)
-            println ">> Generated abi.json for thirdpartylib"
         }
 
-        // ==================== zlib 模块（作为内部模块） ====================
-        // 5. 从conan包复制zlib头文件
-        def zlibPackageFolder = conanPackageFoldersMap['zlib']
-        if (zlibPackageFolder) {
-            def zlibIncludeSrc = new File(zlibPackageFolder, "include")
-            def zlibIncludeDest = new File(zlibModuleDir, "include")
-            if (zlibIncludeSrc.exists()) {
-                zlibIncludeDest.mkdirs()
-                copy {
-                    from zlibIncludeSrc
-                    into zlibIncludeDest
-                    include '**/*.h'
-                }
-                println ">> Copied zlib headers to ${zlibIncludeDest}"
-            }
-
-            // 6. 复制zlib.so到Prefab libs目录
-            def zlibSoSrc = new File(zlibPackageFolder, "lib")
-            if (zlibSoSrc.exists()) {
-                def zlibSoFile = new File(zlibSoSrc, "libz.so")
-                if (zlibSoFile.exists()) {
-                    def zlibLibDir = new File(zlibModuleDir, "libs/android.${abi}")
-                    zlibLibDir.mkdirs()
-                    copy {
-                        from zlibSoFile
-                        into zlibLibDir
-                    }
-                    println ">> Copied libz.so to Prefab libs: ${zlibLibDir}"
-                }
-            }
-        } else {
-            println ">> Warning: zlib package folder not found"
+        // ==================== 为每个依赖生成 prefab 模块 ====================
+        dependencies.each { packageName ->
+            generatePrefabModule(packageName, abi, variant, modulesDir)
         }
 
-        // 7. 生成zlib/module.json
-        // 注意：library_name需要包含lib前缀
-        generateModuleJson(zlibModuleDir, "libz", [])
-
-        // 8. 生成zlib/abi.json
-        def zlibLibDir = new File(zlibModuleDir, "libs/android.${abi}")
-        if (zlibLibDir.exists()) {
-            def minSdk = android.defaultConfig.minSdk ?: 21
-            def ndkVersion = project.hasProperty('ndkVersion') ? ndkVersion : "25.1.8937393"
-            def ndkMajor = ndkVersion.split('\\.')[0].toInteger()
-            def stl = "c++_shared"
-
-            def libFile = zlibLibDir.listFiles().find { it.name.endsWith('.so') || it.name.endsWith('.a') }
-            def isStatic = libFile?.name?.endsWith('.a') ?: false
-
-            generateAbiJson(zlibLibDir, abi, minSdk, ndkMajor, stl, isStatic)
-            println ">> Generated abi.json for zlib"
-        }
-
-        // ==================== openssl 模块（作为内部模块） ====================
-        // 9. 从conan包复制openssl头文件
-        def opensslPackageFolder = conanPackageFoldersMap['openssl']
-        def opensslModuleDir = new File(modulesDir, "openssl")
-        if (opensslPackageFolder) {
-            def opensslIncludeSrc = new File(opensslPackageFolder, "include")
-            def opensslIncludeDest = new File(opensslModuleDir, "include")
-            if (opensslIncludeSrc.exists()) {
-                opensslIncludeDest.mkdirs()
-                copy {
-                    from opensslIncludeSrc
-                    into opensslIncludeDest
-                    include '**/*.h'
-                }
-                println ">> Copied openssl headers to ${opensslIncludeDest}"
-            }
-
-            // 10. 复制openssl库文件
-            def opensslLibSrc = new File(opensslPackageFolder, "lib")
-            if (opensslLibSrc.exists()) {
-                def opensslLibDir = new File(opensslModuleDir, "libs/android.${abi}")
-                opensslLibDir.mkdirs()
-
-                // 复制libcrypto.so
-                def cryptoSoFile = new File(opensslLibSrc, "libcrypto.so")
-                if (cryptoSoFile.exists()) {
-                    copy {
-                        from cryptoSoFile
-                        into opensslLibDir
-                    }
-                    println ">> Copied libcrypto.so"
-                } else {
-                    println ">> Warning: libcrypto.so not found in ${opensslLibSrc}"
-                }
-
-                // 复制libssl.so
-                def sslSoFile = new File(opensslLibSrc, "libssl.so")
-                if (sslSoFile.exists()) {
-                    copy {
-                        from sslSoFile
-                        into opensslLibDir
-                    }
-                    println ">> Copied libssl.so"
-                } else {
-                    println ">> Warning: libssl.so not found in ${opensslLibSrc}"
-                }
-            }
-        } else {
-            println ">> Warning: openssl package folder not found"
-        }
-
-        // 11. 生成openssl/module.json
-        generateModuleJson(opensslModuleDir, "libcrypto", [])
-
-        // 12. 生成openssl/abi.json
-        def opensslLibDir = new File(opensslModuleDir, "libs/android.${abi}")
-        if (opensslLibDir.exists()) {
-            def minSdk = android.defaultConfig.minSdk ?: 21
-            def ndkVersion = project.hasProperty('ndkVersion') ? ndkVersion : "25.1.8937393"
-            def ndkMajor = ndkVersion.split('\\.')[0].toInteger()
-            def stl = "c++_shared"
-
-            def libFile = opensslLibDir.listFiles().find { it.name.endsWith('.so') || it.name.endsWith('.a') }
-            def isStatic = libFile?.name?.endsWith('.a') ?: false
-
-            generateAbiJson(opensslLibDir, abi, minSdk, ndkMajor, stl, isStatic)
-            println ">> Generated abi.json for openssl"
-        }
-
-        // ==================== 生成prefab.json ====================
+        // ==================== 生成 prefab.json ====================
         generatePrefabJson(prefabDir)
 
         println ">> Prefab assembled at: ${prefabDir.absolutePath}"
