@@ -248,7 +248,7 @@ def parseConanfileTxt(File conanfile) {
     return deps
 }
 
-// 针对每个依赖生成 prefab 模块
+// 针对每个依赖生成 prefab 模块（每个库文件独立为一个模块）
 def generatePrefabModule(String packageName, String abi, String variant, File modulesDir) {
     def packageFolder = conanPackageFoldersMap[packageName]
     if (!packageFolder) {
@@ -256,58 +256,53 @@ def generatePrefabModule(String packageName, String abi, String variant, File mo
         return
     }
 
-    def moduleDir = new File(modulesDir, packageName)
-    def libsDir = new File(moduleDir, "libs/android.${abi}")
+    println ">> Generating prefab modules for: ${packageName}"
 
-    println ">> Generating prefab module: ${packageName}"
-
-    // 1. 复制头文件
-    def includeSrc = new File(packageFolder, "include")
-    if (includeSrc.exists()) {
-        def includeDest = new File(moduleDir, "include")
-        includeDest.mkdirs()
-        copy {
-            from includeSrc
-            into includeDest
-            include '**/*.h'
-        }
-        println ">>   Copied headers: ${includeSrc}"
-    }
-
-    // 2. 复制库文件 (.so 或 .a)
     def libSrc = new File(packageFolder, "lib")
+    def includeSrc = new File(packageFolder, "include")
+
+    // 为每个 .so/.a 文件创建独立模块
     if (libSrc.exists() && libSrc.listFiles()) {
-        libsDir.mkdirs()
         libSrc.eachFile { file ->
             if (file.name.endsWith('.so') || file.name.endsWith('.a')) {
+                // 模块名 = 文件名去掉 lib 前缀
+                def libName = file.name.replaceAll(/\.(so|a)$/, '')  // e.g., "libssl.so" -> "libssl"
+                def moduleName = libName.replaceFirst(/^lib/, '')     // e.g., "libssl" -> "ssl"
+
+                def moduleDir = new File(modulesDir, moduleName)
+                def libsDir = new File(moduleDir, "libs/android.${abi}")
+                libsDir.mkdirs()
+
+                // 复制库文件
                 copy {
                     from file
                     into libsDir
                 }
-                println ">>   Copied library: ${file.name}"
+                println ">>   Created module: ${moduleName} (${file.name})"
+
+                // 复制头文件
+                if (includeSrc.exists()) {
+                    def includeDest = new File(moduleDir, "include")
+                    includeDest.mkdirs()
+                    copy {
+                        from includeSrc
+                        into includeDest
+                        include '**/*.h'
+                    }
+                }
+
+                // 生成 module.json
+                generateModuleJson(moduleDir, libName, [])
+
+                // 生成 abi.json
+                def minSdk = android.defaultConfig.minSdk ?: 21
+                def ndkVersion = project.hasProperty('ndkVersion') ? ndkVersion : "25.1.8937393"
+                def ndkMajor = ndkVersion.split('\\.')[0].toInteger()
+                def isStatic = file.name.endsWith('.a')
+                generateAbiJson(libsDir, abi, minSdk, ndkMajor, "c++_shared", isStatic)
             }
         }
     }
-
-    // 3. 确定 library_name
-    def libraryName = "lib${packageName}"
-    if (libsDir.exists()) {
-        def libFile = libsDir.listFiles().find { it.name.endsWith('.so') || it.name.endsWith('.a') }
-        if (libFile) {
-            libraryName = libFile.name.replaceAll(/\.(so|a)$/, '')
-        }
-    }
-    generateModuleJson(moduleDir, libraryName, [])
-
-    // 4. 生成 abi.json
-    def minSdk = android.defaultConfig.minSdk ?: 21
-    def ndkVersion = project.hasProperty('ndkVersion') ? ndkVersion : "25.1.8937393"
-    def ndkMajor = ndkVersion.split('\\.')[0].toInteger()
-    def stl = "c++_shared"
-    def libFile = libsDir.listFiles()?.find { it.name.endsWith('.so') || it.name.endsWith('.a') }
-    def isStatic = libFile?.name?.endsWith('.a') ?: false
-    generateAbiJson(libsDir, abi, minSdk, ndkMajor, stl, isStatic)
-    println ">>   Generated module.json and abi.json"
 }
 
 // 自定义Task: assemblePrefab
@@ -332,11 +327,38 @@ task assemblePrefab {
 
         println ">> assemblePrefab: prefabDir=${prefabDir}"
 
+        // 1. 从 conanfile.txt 读取依赖
+        def conanfileTxt = new File(projectDir, "conanfile.txt")
+        def dependencies = parseConanfileTxt(conanfileTxt)
+        println ">> Dependencies from conanfile.txt: ${dependencies}"
+
+        // ==================== 先为每个依赖生成 prefab 模块 ====================
+        // 收集所有生成的模块名（去掉 lib 前缀）
+        def generatedModules = []
+        dependencies.each { packageName ->
+            generatePrefabModule(packageName, abi, variant, modulesDir)
+            // 收集该包下所有库文件的模块名
+            def packageFolder = conanPackageFoldersMap[packageName]
+            if (packageFolder) {
+                def libSrc = new File(packageFolder, "lib")
+                if (libSrc.exists()) {
+                    libSrc.eachFile { file ->
+                        if (file.name.endsWith('.so') || file.name.endsWith('.a')) {
+                            def libName = file.name.replaceAll(/\.(so|a)$/, '')
+                            def moduleName = libName.replaceFirst(/^lib/, '')
+                            generatedModules << ":${moduleName}"
+                        }
+                    }
+                }
+            }
+        }
+        println ">> Generated modules: ${generatedModules}"
+
         // ==================== thirdparty 模块 ====================
         def thirdpartyModuleDir = new File(modulesDir, "thirdpartylib")
         thirdpartyModuleDir.mkdirs()
 
-        // 1. 复制 libthirdpartylib.so
+        // 2. 复制 libthirdpartylib.so
         def thirdpartyLibSo = findLibraryFile(buildDir, abi, "libthirdpartylib.so")
         if (thirdpartyLibSo) {
             def libDir = new File(thirdpartyModuleDir, "libs/android.${abi}")
@@ -348,7 +370,7 @@ task assemblePrefab {
             println ">> Copied libthirdpartylib.so"
         }
 
-        // 2. 复制自己的头文件
+        // 3. 复制自己的头文件
         def ownHeadersSrc = new File(projectDir, "src/main/cpp/include")
         def ownHeadersDest = new File(thirdpartyModuleDir, "include")
         if (ownHeadersSrc.exists()) {
@@ -360,13 +382,9 @@ task assemblePrefab {
             }
         }
 
-        // 3. 从 conanfile.txt 读取依赖
-        def conanfileTxt = new File(projectDir, "conanfile.txt")
-        def dependencies = parseConanfileTxt(conanfileTxt)
-        println ">> Dependencies from conanfile.txt: ${dependencies}"
-
-        // 4. 生成 thirdparty/module.json，添加依赖
-        generateModuleJson(thirdpartyModuleDir, "libthirdpartylib", dependencies.collect { ":${it}" })
+        // 4. 生成 thirdparty/module.json（添加所有依赖模块）
+        generateModuleJson(thirdpartyModuleDir, "libthirdpartylib", generatedModules)
+        println ">> Added dependencies to thirdpartylib: ${generatedModules}"
 
         // 5. 生成 thirdparty/abi.json
         def thirdpartyLibDir = new File(thirdpartyModuleDir, "libs/android.${abi}")
@@ -378,11 +396,6 @@ task assemblePrefab {
             def libFile = thirdpartyLibDir.listFiles()?.find { it.name.endsWith('.so') || it.name.endsWith('.a') }
             def isStatic = libFile?.name?.endsWith('.a') ?: false
             generateAbiJson(thirdpartyLibDir, abi, minSdk, ndkMajor, stl, isStatic)
-        }
-
-        // ==================== 为每个依赖生成 prefab 模块 ====================
-        dependencies.each { packageName ->
-            generatePrefabModule(packageName, abi, variant, modulesDir)
         }
 
         // ==================== 生成 prefab.json ====================
