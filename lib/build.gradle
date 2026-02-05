@@ -45,7 +45,7 @@ android {
     }
 }
 
-// arch映射：AGP ABI -> Conan arch
+// Conan 配置常量
 ext.abiToConanArch = [
     'arm64-v8a': 'armv8',
     'armeabi-v7a': 'armv7',
@@ -53,158 +53,10 @@ ext.abiToConanArch = [
     'x86': 'x86'
 ]
 
-// 存储include目录的全局Map：key=组件名, value=路径列表
-ext.conanIncludeDirsMap = [:]
-
-// 方法1：执行conan install
-def executeConanInstall(String build_type, String arch) {
-    def conanExecutable = "conan"
-    def cmd = conanExecutable + " install " +
-              ". --profile android.profile -s build_type=" + build_type + " -s arch=" + arch +
-              " --build missing -c tools.cmake.cmake_layout:build_folder_vars=['settings.arch']"
-    print(">> ${cmd} \n")
-
-    def sout = new StringBuilder(), serr = new StringBuilder()
-    def proc = cmd.execute(null, projectDir)
-    proc.consumeProcessOutput(sout, serr)
-    proc.waitFor()
-    println "$sout $serr"
-    if (proc.exitValue() != 0) {
-        throw new Exception("out> $sout err> $serr" + "\nCommand: ${cmd}")
-    }
-}
-
-// 方法2：执行conan graph info并收集include目录
-def collectIncludeDirs(String build_type, String arch) {
-    def cmd = "conan graph info . --profile android.profile " +
-              "-s build_type=${build_type} -s arch=${arch} --format=json"
-    println ">> ${cmd}"
-
-    def sout = new StringBuilder(), serr = new StringBuilder()
-    def proc = cmd.execute(null, projectDir)
-    proc.consumeProcessOutput(sout, serr)
-    proc.waitFor()
-
-    if (proc.exitValue() != 0) {
-        throw new Exception("conan graph info failed: ${serr}")
-    }
-
-    // 解析JSON
-    def jsonSlurper = new groovy.json.JsonSlurper()
-    def graphInfo = jsonSlurper.parseText(sout.toString())
-    def nodes = graphInfo.graph.nodes
-
-    // 遍历节点，找到有package_id的非CLI节点
-    nodes.each { id, node ->
-        def packageId = node.package_id
-        def recipe = node.recipe
-
-        // 跳过CLI节点（recipe为Cli或Consumer）
-        if (packageId && recipe != 'Cli' && recipe != 'Consumer') {
-            def ref = node.ref.split('#')[0]  // 去掉revision，如 "zlib/1.3.1#xxx" -> "zlib/1.3.1"
-            def packageName = ref.split('/')[0].toLowerCase()  // 提取包名，如 "zlib"
-
-            // 使用conan cache path获取包路径
-            def cacheCmd = "conan cache path ${ref}:${packageId}"
-            println ">> ${cacheCmd}"
-
-            def cacheSout = new StringBuilder(), cacheSerr = new StringBuilder()
-            def cacheProc = cacheCmd.execute(null, projectDir)
-            cacheProc.consumeProcessOutput(cacheSout, cacheSerr)
-            cacheProc.waitFor()
-
-            if (cacheProc.exitValue() == 0) {
-                def packageFolder = cacheSout.toString().trim()
-
-                // 从cpp_info.root.includedirs获取相对路径
-                def includedirs = node.cpp_info?.root?.includedirs
-                if (includedirs) {
-                    def includeDirs = []
-                    includedirs.each { relativePath ->
-                        def includeDir = new File(packageFolder, relativePath)
-                        if (includeDir.exists()) {
-                            includeDirs << includeDir.absolutePath
-                            println ">> Found include dir for ${packageName}: ${includeDir.absolutePath}"
-                        }
-                    }
-                    if (includeDirs) {
-                        conanIncludeDirsMap[packageName] = includeDirs
-                    }
-                }
-            }
-        }
-    }
-}
-
-task conanInstall {
-    // 从AGP配置读取abiFilters，默认['arm64-v8a']
-    def abiFilters = android.defaultConfig.ndk.abiFilters ?: ['arm64-v8a']
-
-    doLast {
-        ["Debug", "Release", "RelWithDebInfo"].each { String buildType ->
-            abiFilters.each { String abi ->
-                def arch = abiToConanArch[abi]
-                if (!arch) {
-                    throw new Exception("Unknown ABI: ${abi}")
-                }
-
-                executeConanInstall(buildType, arch)
-
-                // 只在第一个ABI时收集include目录（避免重复）
-                if (abi == abiFilters[0]) {
-                    collectIncludeDirs(buildType, arch)
-                }
-            }
-        }
-        // 打印最终结果
-        println ">> Collected include directories:"
-        conanIncludeDirsMap.each { packageName, dirs ->
-            println ">>   ${packageName}:"
-            dirs.each { println ">>     ${it}" }
-        }
-
-        // 将收集到的头文件复制到 .cxx/headers 目录
-        def headersDir = new File(projectDir, ".cxx/include")
-        headersDir.mkdirs()
-
-        conanIncludeDirsMap.each { packageName, dirs ->
-            dirs.each { includePath ->
-                def srcDir = new File(includePath)
-                def destDir = new File(headersDir, packageName)
-                copy {
-                    from srcDir
-                    into destDir
-                    include '**/*.h'
-                }
-            }
-        }
-
-        // 拷贝项目自身的头文件到 include 根目录
-        def ownHeadersDir = new File(projectDir, "src/main/cpp/include")
-        if (ownHeadersDir.exists()) {
-            copy {
-                from ownHeadersDir
-                into headersDir
-                include '**/*.h'
-            }
-        }
-
-        println ">> Headers copied to: ${headersDir.absolutePath}"
-    }
-}
-
-tasks.named("preBuild").configure {
-    dependsOn("conanInstall")
-}
-
-// ============================================================
-// 手动Prefab相关配置
-// ============================================================
-
 // 存储conan包的package folder路径
 ext.conanPackageFoldersMap = [:]
 
-// 从conan graph info收集package folder路径
+// 收集conan包路径到 conanPackageFoldersMap
 def collectPackageFolders(String build_type, String arch) {
     def cmd = "conan graph info . --profile android.profile " +
               "-s build_type=${build_type} -s arch=${arch} --format=json"
@@ -231,7 +83,6 @@ def collectPackageFolders(String build_type, String arch) {
             def ref = node.ref.split('#')[0]
             def packageName = ref.split('/')[0].toLowerCase()
 
-            // 使用conan cache path获取包路径
             def cacheCmd = "conan cache path ${ref}:${packageId}"
             def cacheSout = new StringBuilder(), cacheSerr = new StringBuilder()
             def cacheProc = cacheCmd.execute(null, projectDir)
@@ -247,8 +98,28 @@ def collectPackageFolders(String build_type, String arch) {
     }
 }
 
+task conanInstall {
+    doLast {
+        def abiFilters = ['arm64-v8a']
+        abiFilters.each { abi ->
+            def arch = abiToConanArch[abi]
+            def cmd = "conan install . --profile android.profile " +
+                      "-s build_type=Release -s arch=${arch} --build missing"
+            println ">> ${cmd}"
+            def proc = cmd.execute(null, projectDir)
+            proc.waitFor()
+            if (proc.exitValue() != 0) {
+                throw new Exception("conan install failed")
+            }
+        }
+    }
+}
+
+// ============================================================
+// Prefab 生成工具方法
+// ============================================================
+
 // 在conanInstall中收集package folders
-// 在原始conanInstall task之后添加收集逻辑
 def conanInstallTask = tasks.getByName('conanInstall')
 conanInstallTask.finalizedBy tasks.register('collectPackageFoldersTask') {
     doLast {
@@ -259,6 +130,10 @@ conanInstallTask.finalizedBy tasks.register('collectPackageFoldersTask') {
             }
         }
     }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn("conanInstall")
 }
 
 // 生成prefab.json (Prefab Package 2 格式)
@@ -563,117 +438,6 @@ afterEvaluate {
         }
     }
 }
-
-// 辅助方法：使用patchelf读取库的soname
-def getSoname(File soFile) {
-    def cmd = "patchelf --print-soname ${soFile.absolutePath}"
-    def result = cmd.execute(null, null).text.trim()
-    return result
-}
-
-// 辅助方法：获取NEEDED依赖列表
-def getNeededLibraries(File soFile) {
-    def cmd = "patchelf --print-needed ${soFile.absolutePath}"
-    def result = cmd.execute(null, null).text.trim()
-    return result.readLines().collect { it.trim() }
-}
-
-// 处理单个.so文件
-def patchSoFile(File soFile) {
-    if (!soFile.name.endsWith(".so")) return
-
-    def fileName = soFile.name
-    println ">> Processing: ${fileName}"
-
-    // 1. 修改SONAME
-    def currentSoname = getSoname(soFile)
-    if (currentSoname != fileName) {
-        def cmd = "patchelf --set-soname ${fileName} ${soFile.absolutePath}"
-        println ">>   SONAME: ${currentSoname} -> ${fileName}"
-        cmd.execute(null, null).waitFor()
-    } else {
-        println ">>   SONAME matches, skipping"
-    }
-
-    // 2. 修改NEEDED依赖
-    def neededLibs = getNeededLibraries(soFile)
-    neededLibs.each { neededLib ->
-        if (neededLib.contains(".so.")) {
-            def targetLib = neededLib.replaceAll(/\.so\..+$/, '.so')
-            if (neededLib != targetLib) {
-                def cmd = "patchelf --replace-needed ${neededLib} ${targetLib} ${soFile.absolutePath}"
-                println ">>   NEEDED: ${neededLib} -> ${targetLib}"
-                cmd.execute(null, null).waitFor()
-            }
-        }
-    }
-
-    // 3. 验证：重新读取并打印最终结果
-    def finalSoname = getSoname(soFile)
-    def finalNeeded = getNeededLibraries(soFile)
-    println ">>   VERIFIED: SONAME=${finalSoname}, NEEDED=${finalNeeded}"
-}
-
-// Hook mergeNativeLibs任务，处理所有soname与文件名不匹配的.so文件
-// 暂时屏蔽，评估CMAKE_PLATFORM_NO_VERSIONED_SONAME
-/*
-afterEvaluate {
-    // 查找mergeReleaseNativeLibs任务
-    def mergeTask = tasks.find { it.name == "mergeReleaseNativeLibs" }
-    if (mergeTask) {
-        println ">> Found mergeReleaseNativeLibs task"
-
-        // 创建一个新任务，在mergeTask之后执行
-        def patchTask = tasks.register("patchNativeLibsTask") {
-            doLast {
-                def jniDirPath = "${layout.buildDirectory.get()}/intermediates/merged_native_libs/release/mergeReleaseNativeLibs/out/lib/arm64-v8a"
-                def jniDir = new File(jniDirPath)
-                println ">> Processing directory: ${jniDir}"
-                if (jniDir.exists()) {
-                    jniDir.eachFileRecurse { file ->
-                        if (file.name.endsWith(".so")) {
-                            patchSoFile(file)
-                        }
-                    }
-                }
-            }
-        }
-
-        // 设置依赖关系
-        mergeTask.finalizedBy patchTask
-    } else {
-        println ">> mergeReleaseNativeLibs task not found"
-    }
-
-    // ==================== copyReleaseJniLibs任务：处理jni目录 ====================
-    // AAR的jni目录使用copyReleaseJniLibsProjectAndLocalJars的输出
-    // 需要确保进入AAR的so文件也被patch
-    def copyTask = tasks.find { it.name == "copyReleaseJniLibsProjectAndLocalJars" }
-    if (copyTask) {
-        println ">> Found copyReleaseJniLibsProjectAndLocalJars task"
-
-        def patchCopyTask = tasks.register("patchCopyReleaseJniLibsTask") {
-            doLast {
-                def jniDirPath = "${layout.buildDirectory.get()}/intermediates/library_and_local_jars_jni/release/copyReleaseJniLibsProjectAndLocalJars/jni/arm64-v8a"
-                def jniDir = new File(jniDirPath)
-                println ">> Processing copyReleaseJniLibs directory: ${jniDir}"
-                if (jniDir.exists()) {
-                    jniDir.eachFileRecurse { file ->
-                        if (file.name.endsWith(".so")) {
-                            patchSoFile(file)
-                        }
-                    }
-                }
-            }
-        }
-
-        // 设置依赖关系
-        copyTask.finalizedBy patchCopyTask
-    } else {
-        println ">> copyReleaseJniLibsProjectAndLocalJars task not found"
-    }
-}
-*/
 
 // Maven发布配置
 publishing {
