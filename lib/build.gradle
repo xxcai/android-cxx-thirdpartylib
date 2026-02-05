@@ -101,15 +101,19 @@ def collectPackageFolders(String build_type, String arch) {
 task conanInstall {
     doLast {
         def abiFilters = ['arm64-v8a']
+        def buildTypes = ["Debug", "Release", "RelWithDebInfo"]
         abiFilters.each { abi ->
-            def arch = abiToConanArch[abi]
-            def cmd = "conan install . --profile android.profile " +
-                      "-s build_type=Release -s arch=${arch} --build missing"
-            println ">> ${cmd}"
-            def proc = cmd.execute(null, projectDir)
-            proc.waitFor()
-            if (proc.exitValue() != 0) {
-                throw new Exception("conan install failed")
+            buildTypes.each {buildType ->
+                def arch = abiToConanArch[abi]
+                def cmd = "conan install " +
+                        "--profile android.profile -s build_type=" + buildType +" -s arch=" + arch +
+                        " --build missing -c tools.cmake.cmake_layout:build_folder_vars=['settings.arch']"
+                println ">> ${cmd}"
+                def proc = cmd.execute(null, projectDir)
+                proc.waitFor()
+                if (proc.exitValue() != 0) {
+                    throw new Exception("conan install failed")
+                }
             }
         }
     }
