@@ -22,6 +22,7 @@ public class MainActivity extends Activity {
     private native int nativeAdd(int a, int b);
     private native String nativeTestZlib(String input);
     private native String nativeTestZlibDecompress(String input);
+    private native String nativeTestOpenSSL(String input);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -58,6 +59,15 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 testZlib();
+            }
+        });
+
+        // 测试app native直接调用openssl
+        Button btnOpenssl = findViewById(R.id.btn_openssl);
+        btnOpenssl.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                testOpenSSL();
             }
         });
     }
@@ -104,6 +114,20 @@ public class MainActivity extends Activity {
             String result = nativeTestZlib(input);
             Toast.makeText(this, "Zlib test: " + result, Toast.LENGTH_SHORT).show();
             Log.i(TAG, "Zlib test: " + result);
+        } catch (Exception e) {
+            String msg = "Error: " + e.getMessage();
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            Log.e(TAG, msg);
+        }
+    }
+
+    // 测试app native直接调用openssl（通过prefab引入）
+    private void testOpenSSL() {
+        try {
+            String input = "Hello, OpenSSL!";
+            String result = nativeTestOpenSSL(input);
+            Toast.makeText(this, "OpenSSL SHA256: " + result, Toast.LENGTH_SHORT).show();
+            Log.i(TAG, "OpenSSL test: " + result);
         } catch (Exception e) {
             String msg = "Error: " + e.getMessage();
             Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();

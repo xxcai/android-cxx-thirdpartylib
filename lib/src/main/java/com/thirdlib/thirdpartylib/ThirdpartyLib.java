@@ -26,4 +26,11 @@ public class ThirdpartyLib {
      * @return 相加结果
      */
     public native int add(int a, int b);
+
+    /**
+     * 测试OpenSSL SHA256哈希
+     * @param input 输入字符串
+     * @return SHA256哈希值(hex)
+     */
+    public native String testOpenSSL(String input);
 }

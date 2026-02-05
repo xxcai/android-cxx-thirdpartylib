@@ -7,4 +7,6 @@ find_package(thirdpartylib REQUIRED CONFIG)
 add_library(app SHARED native-lib.cpp)
 
 # 链接thirdpartylib模块（会自动传递zlib依赖）
-target_link_libraries(app thirdpartylib::thirdpartylib)
+target_link_libraries(app
+    thirdpartylib::thirdpartylib
+)

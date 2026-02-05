@@ -5,6 +5,11 @@ project(thirdpartylib)
 add_library(thirdpartylib SHARED src/main/cpp/native-lib.cpp)
 
 find_package(ZLIB CONFIG)
+find_package(OpenSSL CONFIG)  # 新增
 
-# 链接 NDK 系统库
-target_link_libraries(thirdpartylib ZLIB::ZLIB)
+# 链接库
+target_link_libraries(thirdpartylib
+    ZLIB::ZLIB
+    OpenSSL::Crypto
+    OpenSSL::SSL       # 新增：确保libssl.so被复制到jni目录
+)

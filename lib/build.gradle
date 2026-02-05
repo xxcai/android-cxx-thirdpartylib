@@ -407,7 +407,8 @@ task assemblePrefab {
 
         // 3. 生成thirdpartylib/module.json
         // 注意：library_name需要包含lib前缀，因为Prefab CLI 2.0.0的bug不会自动添加
-        generateModuleJson(thirdpartyModuleDir, "libthirdpartylib", [":zlib"])
+        // 添加zlib和openssl依赖
+        generateModuleJson(thirdpartyModuleDir, "libthirdpartylib", [":zlib", ":openssl"])
 
         // 4. 生成thirdpartylib/abi.json
         def thirdpartyLibDir = new File(thirdpartyModuleDir, "libs/android.${abi}")
@@ -477,6 +478,75 @@ task assemblePrefab {
             println ">> Generated abi.json for zlib"
         }
 
+        // ==================== openssl 模块（作为内部模块） ====================
+        // 9. 从conan包复制openssl头文件
+        def opensslPackageFolder = conanPackageFoldersMap['openssl']
+        def opensslModuleDir = new File(modulesDir, "openssl")
+        if (opensslPackageFolder) {
+            def opensslIncludeSrc = new File(opensslPackageFolder, "include")
+            def opensslIncludeDest = new File(opensslModuleDir, "include")
+            if (opensslIncludeSrc.exists()) {
+                opensslIncludeDest.mkdirs()
+                copy {
+                    from opensslIncludeSrc
+                    into opensslIncludeDest
+                    include '**/*.h'
+                }
+                println ">> Copied openssl headers to ${opensslIncludeDest}"
+            }
+
+            // 10. 复制openssl库文件
+            def opensslLibSrc = new File(opensslPackageFolder, "lib")
+            if (opensslLibSrc.exists()) {
+                def opensslLibDir = new File(opensslModuleDir, "libs/android.${abi}")
+                opensslLibDir.mkdirs()
+
+                // 复制libcrypto.so
+                def cryptoSoFile = new File(opensslLibSrc, "libcrypto.so")
+                if (cryptoSoFile.exists()) {
+                    copy {
+                        from cryptoSoFile
+                        into opensslLibDir
+                    }
+                    println ">> Copied libcrypto.so"
+                } else {
+                    println ">> Warning: libcrypto.so not found in ${opensslLibSrc}"
+                }
+
+                // 复制libssl.so
+                def sslSoFile = new File(opensslLibSrc, "libssl.so")
+                if (sslSoFile.exists()) {
+                    copy {
+                        from sslSoFile
+                        into opensslLibDir
+                    }
+                    println ">> Copied libssl.so"
+                } else {
+                    println ">> Warning: libssl.so not found in ${opensslLibSrc}"
+                }
+            }
+        } else {
+            println ">> Warning: openssl package folder not found"
+        }
+
+        // 11. 生成openssl/module.json
+        generateModuleJson(opensslModuleDir, "libcrypto", [])
+
+        // 12. 生成openssl/abi.json
+        def opensslLibDir = new File(opensslModuleDir, "libs/android.${abi}")
+        if (opensslLibDir.exists()) {
+            def minSdk = android.defaultConfig.minSdk ?: 21
+            def ndkVersion = project.hasProperty('ndkVersion') ? ndkVersion : "25.1.8937393"
+            def ndkMajor = ndkVersion.split('\\.')[0].toInteger()
+            def stl = "c++_shared"
+
+            def libFile = opensslLibDir.listFiles().find { it.name.endsWith('.so') || it.name.endsWith('.a') }
+            def isStatic = libFile?.name?.endsWith('.a') ?: false
+
+            generateAbiJson(opensslLibDir, abi, minSdk, ndkMajor, stl, isStatic)
+            println ">> Generated abi.json for openssl"
+        }
+
         // ==================== 生成prefab.json ====================
         generatePrefabJson(prefabDir)
 
@@ -534,6 +604,117 @@ afterEvaluate {
         }
     }
 }
+
+// 辅助方法：使用patchelf读取库的soname
+def getSoname(File soFile) {
+    def cmd = "patchelf --print-soname ${soFile.absolutePath}"
+    def result = cmd.execute(null, null).text.trim()
+    return result
+}
+
+// 辅助方法：获取NEEDED依赖列表
+def getNeededLibraries(File soFile) {
+    def cmd = "patchelf --print-needed ${soFile.absolutePath}"
+    def result = cmd.execute(null, null).text.trim()
+    return result.readLines().collect { it.trim() }
+}
+
+// 处理单个.so文件
+def patchSoFile(File soFile) {
+    if (!soFile.name.endsWith(".so")) return
+
+    def fileName = soFile.name
+    println ">> Processing: ${fileName}"
+
+    // 1. 修改SONAME
+    def currentSoname = getSoname(soFile)
+    if (currentSoname != fileName) {
+        def cmd = "patchelf --set-soname ${fileName} ${soFile.absolutePath}"
+        println ">>   SONAME: ${currentSoname} -> ${fileName}"
+        cmd.execute(null, null).waitFor()
+    } else {
+        println ">>   SONAME matches, skipping"
+    }
+
+    // 2. 修改NEEDED依赖
+    def neededLibs = getNeededLibraries(soFile)
+    neededLibs.each { neededLib ->
+        if (neededLib.contains(".so.")) {
+            def targetLib = neededLib.replaceAll(/\.so\..+$/, '.so')
+            if (neededLib != targetLib) {
+                def cmd = "patchelf --replace-needed ${neededLib} ${targetLib} ${soFile.absolutePath}"
+                println ">>   NEEDED: ${neededLib} -> ${targetLib}"
+                cmd.execute(null, null).waitFor()
+            }
+        }
+    }
+
+    // 3. 验证：重新读取并打印最终结果
+    def finalSoname = getSoname(soFile)
+    def finalNeeded = getNeededLibraries(soFile)
+    println ">>   VERIFIED: SONAME=${finalSoname}, NEEDED=${finalNeeded}"
+}
+
+// Hook mergeNativeLibs任务，处理所有soname与文件名不匹配的.so文件
+// 暂时屏蔽，评估CMAKE_PLATFORM_NO_VERSIONED_SONAME
+/*
+afterEvaluate {
+    // 查找mergeReleaseNativeLibs任务
+    def mergeTask = tasks.find { it.name == "mergeReleaseNativeLibs" }
+    if (mergeTask) {
+        println ">> Found mergeReleaseNativeLibs task"
+
+        // 创建一个新任务，在mergeTask之后执行
+        def patchTask = tasks.register("patchNativeLibsTask") {
+            doLast {
+                def jniDirPath = "${layout.buildDirectory.get()}/intermediates/merged_native_libs/release/mergeReleaseNativeLibs/out/lib/arm64-v8a"
+                def jniDir = new File(jniDirPath)
+                println ">> Processing directory: ${jniDir}"
+                if (jniDir.exists()) {
+                    jniDir.eachFileRecurse { file ->
+                        if (file.name.endsWith(".so")) {
+                            patchSoFile(file)
+                        }
+                    }
+                }
+            }
+        }
+
+        // 设置依赖关系
+        mergeTask.finalizedBy patchTask
+    } else {
+        println ">> mergeReleaseNativeLibs task not found"
+    }
+
+    // ==================== copyReleaseJniLibs任务：处理jni目录 ====================
+    // AAR的jni目录使用copyReleaseJniLibsProjectAndLocalJars的输出
+    // 需要确保进入AAR的so文件也被patch
+    def copyTask = tasks.find { it.name == "copyReleaseJniLibsProjectAndLocalJars" }
+    if (copyTask) {
+        println ">> Found copyReleaseJniLibsProjectAndLocalJars task"
+
+        def patchCopyTask = tasks.register("patchCopyReleaseJniLibsTask") {
+            doLast {
+                def jniDirPath = "${layout.buildDirectory.get()}/intermediates/library_and_local_jars_jni/release/copyReleaseJniLibsProjectAndLocalJars/jni/arm64-v8a"
+                def jniDir = new File(jniDirPath)
+                println ">> Processing copyReleaseJniLibs directory: ${jniDir}"
+                if (jniDir.exists()) {
+                    jniDir.eachFileRecurse { file ->
+                        if (file.name.endsWith(".so")) {
+                            patchSoFile(file)
+                        }
+                    }
+                }
+            }
+        }
+
+        // 设置依赖关系
+        copyTask.finalizedBy patchCopyTask
+    } else {
+        println ">> copyReleaseJniLibsProjectAndLocalJars task not found"
+    }
+}
+*/
 
 // Maven发布配置
 publishing {

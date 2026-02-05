@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <string>
 #include <zlib.h>
+#include <openssl/sha.h>
 #include "thirdparty_lib.h"
 
 extern "C" {
@@ -41,6 +42,24 @@ Java_com_thirdlib_app_MainActivity_nativeTestZlibDecompress(JNIEnv *env, jobject
     std::string result = "zlib_decompress:" + std::string(inputStr);
     env->ReleaseStringUTFChars(input, inputStr);
     return env->NewStringUTF(result.c_str());
+}
+
+// 测试openssl SHA256（通过prefab引入的openssl）
+JNIEXPORT jstring JNICALL
+Java_com_thirdlib_app_MainActivity_nativeTestOpenSSL(JNIEnv *env, jobject thiz, jstring input) {
+    const char* inputStr = env->GetStringUTFChars(input, nullptr);
+
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256((const unsigned char*)inputStr, strlen(inputStr), hash);
+
+    char hexString[SHA256_DIGEST_LENGTH * 2 + 1];
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        sprintf(hexString + (i * 2), "%02x", hash[i]);
+    }
+    hexString[SHA256_DIGEST_LENGTH * 2] = '\0';
+
+    env->ReleaseStringUTFChars(input, inputStr);
+    return env->NewStringUTF(hexString);
 }
 
 }

@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <zlib.h>
+#include <openssl/sha.h>
 #include "include/thirdparty_lib.h"
 
 extern "C" {
@@ -61,6 +62,26 @@ Java_com_thirdlib_thirdpartylib_ThirdpartyLib_decompress(JNIEnv *env, jobject th
     jbyteArray resultArray = env->NewByteArray(decompressedLen);
     env->SetByteArrayRegion(resultArray, 0, decompressedLen, (jbyte *)decompressed.data());
     return resultArray;
+}
+
+// OpenSSL SHA256测试
+JNIEXPORT jstring JNICALL
+Java_com_thirdlib_thirdpartylib_ThirdpartyLib_testOpenSSL(JNIEnv *env, jobject thiz, jstring input) {
+    const char* inputStr = env->GetStringUTFChars(input, nullptr);
+
+    // 使用SHA256计算哈希
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256((const unsigned char*)inputStr, strlen(inputStr), hash);
+
+    // 转换为hex字符串
+    char hexString[SHA256_DIGEST_LENGTH * 2 + 1];
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        sprintf(hexString + (i * 2), "%02x", hash[i]);
+    }
+    hexString[SHA256_DIGEST_LENGTH * 2] = '\0';
+
+    env->ReleaseStringUTFChars(input, inputStr);
+    return env->NewStringUTF(hexString);
 }
 
 }  // extern "C"
