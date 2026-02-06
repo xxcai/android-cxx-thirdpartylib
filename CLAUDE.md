@@ -13,7 +13,7 @@
 - **Build System:** Gradle + AGP + Prefab + CMake/ndk-build + Conan
 - **Min SDK:** 26
 - **Target SDK:** 31
-- **NDK Version:** 25.1.8937393
+- **NDK Version:** 26.3.11579264
 - **Compile SDK Version** 34
 - **Gradle Version** 8.12.1
 - **AGP Version** 8.3.2
