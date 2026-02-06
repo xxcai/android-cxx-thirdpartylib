@@ -3,6 +3,7 @@
 #include <zlib.h>
 #include <openssl/sha.h>
 #include <curl/curl.h>
+#include <nlohmann/json.hpp>
 #include "thirdparty_lib.h"
 
 extern "C" {
@@ -98,6 +99,15 @@ Java_com_thirdlib_app_MainActivity_nativeTestCurl(JNIEnv *env, jobject thiz) {
         }
     }
     return env->NewStringUTF("curl_init_failed");
+}
+
+// 测试 nlohmann_json（通过prefab引入的头文件库）
+JNIEXPORT jstring JNICALL
+Java_com_thirdlib_app_MainActivity_nativeTestNlohmann(JNIEnv *env, jobject thiz) {
+    nlohmann::json j;
+    j["name"] = "test";
+    j["value"] = 123;
+    return env->NewStringUTF(("nlohmann_json:" + j.dump()).c_str());
 }
 
 }

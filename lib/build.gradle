@@ -257,7 +257,7 @@ def parseDepLine(String line, List deps) {
     }
 }
 
-// 针对每个依赖生成 prefab 模块（每个库文件独立为一个模块）
+// 针对每个依赖生成 prefab 模块
 def generatePrefabModule(String packageName, String abi, String variant, File modulesDir) {
     def packageFolder = conanPackageFoldersMap[packageName]
     if (!packageFolder) {
@@ -270,48 +270,74 @@ def generatePrefabModule(String packageName, String abi, String variant, File mo
     def libSrc = new File(packageFolder, "lib")
     def includeSrc = new File(packageFolder, "include")
 
-    // 为每个 .so/.a 文件创建独立模块
+    // 有二进制文件（zlib, openssl, libcurl）
     if (libSrc.exists() && libSrc.listFiles()) {
         libSrc.eachFile { file ->
             if (file.name.endsWith('.so') || file.name.endsWith('.a')) {
-                // 模块名 = 文件名去掉 lib 前缀
-                def libName = file.name.replaceAll(/\.(so|a)$/, '')  // e.g., "libssl.so" -> "libssl"
-                def moduleName = libName.replaceFirst(/^lib/, '')     // e.g., "libssl" -> "ssl"
-
-                def moduleDir = new File(modulesDir, moduleName)
-                def libsDir = new File(moduleDir, "libs/android.${abi}")
-                libsDir.mkdirs()
-
-                // 复制库文件
-                copy {
-                    from file
-                    into libsDir
-                }
-                println ">>   Created module: ${moduleName} (${file.name})"
-
-                // 复制头文件
-                if (includeSrc.exists()) {
-                    def includeDest = new File(moduleDir, "include")
-                    includeDest.mkdirs()
-                    copy {
-                        from includeSrc
-                        into includeDest
-                        include '**/*.h'
-                    }
-                }
-
-                // 生成 module.json
-                generateModuleJson(moduleDir, libName, [])
-
-                // 生成 abi.json
-                def minSdk = android.defaultConfig.minSdk ?: 21
-                def ndkVersion = project.hasProperty('ndkVersion') ? ndkVersion : "25.1.8937393"
-                def ndkMajor = ndkVersion.split('\\.')[0].toInteger()
-                def isStatic = file.name.endsWith('.a')
-                generateAbiJson(libsDir, abi, minSdk, ndkMajor, "c++_shared", isStatic)
+                generateLibModule(file, includeSrc, packageName, abi, modulesDir)
             }
         }
     }
+    // 纯头文件库（nlohmann_json）
+    else if (includeSrc.exists()) {
+        generateHeaderOnlyModule(includeSrc, packageName, abi, modulesDir)
+    }
+}
+
+// 生成有二进制文件的模块
+def generateLibModule(File libFile, File includeSrc, String packageName, String abi, File modulesDir) {
+    def libName = libFile.name.replaceAll(/\.(so|a)$/, '')  // e.g., "libssl.so" -> "libssl"
+    def moduleName = libName.replaceFirst(/^lib/, '')       // e.g., "libssl" -> "ssl"
+    def moduleDir = new File(modulesDir, moduleName)
+    def libsDir = new File(moduleDir, "libs/android.${abi}")
+    libsDir.mkdirs()
+
+    // 复制库文件
+    copy {
+        from libFile
+        into libsDir
+    }
+    println ">>   Created module: ${moduleName} (${libFile.name})"
+
+    // 复制头文件
+    if (includeSrc.exists()) {
+        def includeDest = new File(moduleDir, "include")
+        includeDest.mkdirs()
+        copy {
+            from includeSrc
+            into includeDest
+            include '**/*.h'
+        }
+    }
+
+    // 生成 module.json 和 abi.json
+    def minSdk = android.defaultConfig.minSdk ?: 21
+    def ndkVersion = project.hasProperty('ndkVersion') ? ndkVersion : "25.1.8937393"
+    def ndkMajor = ndkVersion.split('\\.')[0].toInteger()
+    def isStatic = libFile.name.endsWith('.a')
+
+    generateModuleJson(moduleDir, libName, [])
+    generateAbiJson(libsDir, abi, minSdk, ndkMajor, "c++_shared", isStatic)
+}
+
+// 生成纯头文件库模块
+def generateHeaderOnlyModule(File includeSrc, String packageName, String abi, File modulesDir) {
+    def moduleName = packageName  // 如 "nlohmann_json"
+    def moduleDir = new File(modulesDir, moduleName)
+    def includeDest = new File(moduleDir, "include")
+    includeDest.mkdirs()
+
+    // 复制头文件
+    copy {
+        from includeSrc
+        into includeDest
+        include '**/*.hpp'
+    }
+    println ">>   Created header-only module: ${moduleName}"
+
+    // 只生成 module.json，不创建 libs 目录
+    // libs 目录由 Prefab 注入 AAR 时自动生成
+    generateModuleJson(moduleDir, packageName, [])
 }
 
 // 自定义Task: assemblePrefab
@@ -345,11 +371,17 @@ task assemblePrefab {
         def generatedModules = []
         dependencies.each { packageName ->
             generatePrefabModule(packageName, abi, variant, modulesDir)
+
             // 收集该包下所有库文件的模块名
             def packageFolder = conanPackageFoldersMap[packageName]
             if (packageFolder) {
                 def libSrc = new File(packageFolder, "lib")
-                if (libSrc.exists()) {
+                def hasLibFiles = libSrc.exists() && libSrc.listFiles().any {
+                    it.name.endsWith('.so') || it.name.endsWith('.a')
+                }
+
+                if (hasLibFiles) {
+                    // 有库文件的模块（zlib, openssl, curl）
                     libSrc.eachFile { file ->
                         if (file.name.endsWith('.so') || file.name.endsWith('.a')) {
                             def libName = file.name.replaceAll(/\.(so|a)$/, '')
@@ -357,6 +389,9 @@ task assemblePrefab {
                             generatedModules << ":${moduleName}"
                         }
                     }
+                } else {
+                    // 纯头文件库（nlohmann_json），使用 packageName 作为模块名
+                    generatedModules << ":${packageName}"
                 }
             }
         }

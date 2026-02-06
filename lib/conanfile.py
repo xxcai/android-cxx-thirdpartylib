@@ -7,7 +7,7 @@ class ThirdpartyLibConan(ConanFile):
     generators = ["CMakeDeps", "CMakeToolchain"]
     options = {"shared": [True, False]}
     default_options = {"shared": True}
-    requires = "zlib/1.3.1", "openssl/3.6.1", "libcurl/8.1.2"
+    requires = "zlib/1.3.1", "openssl/3.6.1", "libcurl/8.1.2", "nlohmann_json/3.11.3"
 
     def layout(self):
         cmake_layout(self)

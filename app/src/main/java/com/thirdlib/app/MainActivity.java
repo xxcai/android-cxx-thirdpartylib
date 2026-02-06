@@ -24,6 +24,7 @@ public class MainActivity extends Activity {
     private native String nativeTestZlibDecompress(String input);
     private native String nativeTestOpenSSL(String input);
     private native String nativeTestCurl();
+    private native String nativeTestNlohmann();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -78,6 +79,15 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 testCurl();
+            }
+        });
+
+        // 测试 nlohmann_json
+        Button btnNlohmann = findViewById(R.id.btn_nlohmann);
+        btnNlohmann.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                testNlohmann();
             }
         });
     }
@@ -151,6 +161,19 @@ public class MainActivity extends Activity {
             String result = nativeTestCurl();
             Toast.makeText(this, "Curl test: " + result, Toast.LENGTH_SHORT).show();
             Log.i(TAG, "Curl test: " + result);
+        } catch (Exception e) {
+            String msg = "Error: " + e.getMessage();
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            Log.e(TAG, msg);
+        }
+    }
+
+    // 测试 nlohmann_json（通过prefab引入的头文件库）
+    private void testNlohmann() {
+        try {
+            String result = nativeTestNlohmann();
+            Toast.makeText(this, result, Toast.LENGTH_SHORT).show();
+            Log.i(TAG, result);
         } catch (Exception e) {
             String msg = "Error: " + e.getMessage();
             Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
