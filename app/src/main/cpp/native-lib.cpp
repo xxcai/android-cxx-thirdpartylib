@@ -2,6 +2,7 @@
 #include <string>
 #include <zlib.h>
 #include <openssl/sha.h>
+#include <curl/curl.h>
 #include "thirdparty_lib.h"
 
 extern "C" {
@@ -60,6 +61,43 @@ Java_com_thirdlib_app_MainActivity_nativeTestOpenSSL(JNIEnv *env, jobject thiz, 
 
     env->ReleaseStringUTFChars(input, inputStr);
     return env->NewStringUTF(hexString);
+}
+
+// curl 回调函数（标准 C 风格）
+static size_t my_curl_write_callback(void *ptr, size_t size, size_t nmemb, void *userdata) {
+    std::string *response = static_cast<std::string *>(userdata);
+    response->append(static_cast<char *>(ptr), size * nmemb);
+    return size * nmemb;
+}
+
+// 测试 curl HTTP GET
+JNIEXPORT jstring JNICALL
+Java_com_thirdlib_app_MainActivity_nativeTestCurl(JNIEnv *env, jobject thiz) {
+    CURL *curl;
+    CURLcode res;
+    std::string response;
+
+    curl = curl_easy_init();
+    if (curl) {
+        curl_easy_setopt(curl, CURLOPT_URL, "https://httpbin.org/get");
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, my_curl_write_callback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+
+        res = curl_easy_perform(curl);
+        curl_easy_cleanup(curl);
+
+        if (res == CURLE_OK) {
+            long http_code;
+            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+            return env->NewStringUTF(("curl_success:" + std::to_string(http_code)).c_str());
+        } else {
+            return env->NewStringUTF(("curl_error:" + std::string(curl_easy_strerror(res))).c_str());
+        }
+    }
+    return env->NewStringUTF("curl_init_failed");
 }
 
 }

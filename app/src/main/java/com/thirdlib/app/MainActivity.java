@@ -23,6 +23,7 @@ public class MainActivity extends Activity {
     private native String nativeTestZlib(String input);
     private native String nativeTestZlibDecompress(String input);
     private native String nativeTestOpenSSL(String input);
+    private native String nativeTestCurl();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -68,6 +69,15 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 testOpenSSL();
+            }
+        });
+
+        // 测试 curl
+        Button btnCurl = findViewById(R.id.btn_curl);
+        btnCurl.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                testCurl();
             }
         });
     }
@@ -128,6 +138,19 @@ public class MainActivity extends Activity {
             String result = nativeTestOpenSSL(input);
             Toast.makeText(this, "OpenSSL SHA256: " + result, Toast.LENGTH_SHORT).show();
             Log.i(TAG, "OpenSSL test: " + result);
+        } catch (Exception e) {
+            String msg = "Error: " + e.getMessage();
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            Log.e(TAG, msg);
+        }
+    }
+
+    // 测试 curl（通过prefab引入）
+    private void testCurl() {
+        try {
+            String result = nativeTestCurl();
+            Toast.makeText(this, "Curl test: " + result, Toast.LENGTH_SHORT).show();
+            Log.i(TAG, "Curl test: " + result);
         } catch (Exception e) {
             String msg = "Error: " + e.getMessage();
             Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
