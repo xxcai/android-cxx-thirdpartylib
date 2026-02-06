@@ -5,6 +5,7 @@ arch=armv8
 compiler=clang
 compiler.version=17
 compiler.libcxx=c++_shared
+compiler.cppstd=17
 build_type=Release
 
 [conf]
