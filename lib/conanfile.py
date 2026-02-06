@@ -1,0 +1,15 @@
+from conan import ConanFile
+from conan.tools.cmake import cmake_layout
+
+
+class ThirdpartyLibConan(ConanFile):
+    settings = "os", "compiler", "build_type", "arch"
+    generators = ["CMakeDeps", "CMakeToolchain"]
+    options = {"shared": [True, False]}
+    default_options = {"shared": True}
+    requires = "zlib/1.3.1", "openssl/3.6.1", "libcurl/8.1.2"
+
+    def layout(self):
+        cmake_layout(self)
+        self.folders.build = f"build/{self.settings.arch}"
+        self.cpp.source.includedirs = ["src"]

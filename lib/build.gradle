@@ -107,7 +107,7 @@ task conanInstall {
                 def arch = abiToConanArch[abi]
                 def cmd = "conan install " +
                         "--profile android.profile -s build_type=" + buildType +" -s arch=" + arch +
-                        " --build missing -c tools.cmake.cmake_layout:build_folder_vars=['settings.arch']"
+                        " --build missing"
                 println ">> ${cmd}"
                 def proc = cmd.execute(null, projectDir)
                 proc.waitFor()
@@ -228,24 +228,33 @@ def findFileRecursively(File dir, String fileName) {
 
 // ==================== 通用的Prefab模块生成方法 ====================
 
-// 解析 conanfile.txt 获取依赖列表
-def parseConanfileTxt(File conanfile) {
+// 解析 conanfile.py 获取依赖列表
+def parseConanfilePy(File conanfile) {
     def deps = []
-    def inRequires = false
+
     conanfile.eachLine { line ->
         def trimmed = line.trim()
-        if (trimmed.startsWith('[requires]')) {
-            inRequires = true
-        } else if (trimmed.startsWith('[')) {
-            inRequires = false
-        } else if (inRequires && trimmed) {
-            def pkg = trimmed.split('/')[0]
-            if (!deps.contains(pkg)) {
-                deps << pkg
+        // 匹配 requires = "pkg/version", "pkg2/version2" 格式
+        if (trimmed.startsWith('requires =')) {
+            def match = (trimmed =~ /requires\s*=\s*(.+)/)
+            if (match.find()) {
+                def depsStr = match.group(1)
+                parseDepLine(depsStr, deps)
             }
         }
     }
     return deps
+}
+
+// 解析单行依赖字符串
+def parseDepLine(String line, List deps) {
+    line.split(',').each { dep ->
+        def cleaned = dep.trim().replaceAll('"', '').replaceAll("'", '')
+        def pkg = cleaned.split('/')[0]
+        if (pkg && !deps.contains(pkg)) {
+            deps << pkg
+        }
+    }
 }
 
 // 针对每个依赖生成 prefab 模块（每个库文件独立为一个模块）
@@ -327,10 +336,9 @@ task assemblePrefab {
 
         println ">> assemblePrefab: prefabDir=${prefabDir}"
 
-        // 1. 从 conanfile.txt 读取依赖
-        def conanfileTxt = new File(projectDir, "conanfile.txt")
-        def dependencies = parseConanfileTxt(conanfileTxt)
-        println ">> Dependencies from conanfile.txt: ${dependencies}"
+        // 1. 从 conanfile.py 读取依赖
+        def dependencies = parseConanfilePy(new File(projectDir, "conanfile.py"))
+        println ">> Dependencies: ${dependencies}"
 
         // ==================== 先为每个依赖生成 prefab 模块 ====================
         // 收集所有生成的模块名（去掉 lib 前缀）
