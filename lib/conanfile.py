@@ -11,5 +11,6 @@ class ThirdpartyLibConan(ConanFile):
 
     def layout(self):
         cmake_layout(self)
-        self.folders.build = f"build/{self.settings.arch}"
+        self.folders.build = f"build/{self.settings.arch}/{self.settings.build_type}"
+        self.folders.generators = f"build/{self.settings.arch}/{self.settings.build_type}/generators"
         self.cpp.source.includedirs = ["src"]
