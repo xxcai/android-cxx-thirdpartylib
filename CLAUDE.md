@@ -136,3 +136,10 @@ cd ..
 - [Prefab in AGP](https://developer.android.com/build/native-dependencies?hl=zh-cn&agpversion=4.1&buildsystem=cmake)
 - [CMake Documentation](https://cmake.org/documentation/)
 - [Conan](https://docs.conan.io/)
+
+
+# 规则
+1. 禁止为了通过测试为特殊场景硬编码
+2. 禁止通过`rm`清理项目外的gradle缓存，必要情况用`--refresh-dependencies`刷新
+3. 必须得到授权，才能调整组件库版本
+4. 禁止修改我的构建工具链版本，包括不限于JDK、GRADLE、AGP
