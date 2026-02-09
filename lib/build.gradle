@@ -9,8 +9,8 @@ prefab {
     libraryVersion = '1.0.0'
     conanfile = 'conanfile.py'
     profile = 'android.profile'
-    abis = rootProject.ext.abis
-    minSdk = 21
+    abis = ['arm64-v8a']
+    minSdk = 26
     stl = 'c++_shared'
 }
 
@@ -24,7 +24,7 @@ android {
         ndkVersion rootProject.ext.ndkVersion
 
         ndk {
-            abiFilters(*rootProject.ext.abis)
+            abiFilters 'arm64-v8a'
         }
 
         externalNativeBuild {

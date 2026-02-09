@@ -3,7 +3,7 @@ package com.thirdlib.prefab.tasks
 import com.thirdlib.prefab.ConanPrefabExtension
 import org.gradle.api.DefaultTask
 import org.gradle.api.tasks.Input
-import org.gradle.api.tasks.Optional
+import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.TaskAction
 
@@ -24,18 +24,14 @@ class GenerateModulesTask extends DefaultTask {
     @Input
     String libraryVersion
 
-    /**
-     * 所有支持的 ABI 列表
-     */
     @Input
-    List<String> abis
+    String abi
 
     /**
-     * 所有 ABI 的包输出目录列表
+     * Conan 包输出目录（由 CollectPackagesTask 生成）
      */
-    @Input
-    @Optional
-    List<File> packageOutputDirs
+    @InputDirectory
+    File packageOutputDir
 
     @OutputDirectory
     File prefabDir
@@ -45,33 +41,17 @@ class GenerateModulesTask extends DefaultTask {
         def ext = project.extensions.findByType(ConanPrefabExtension)
         def projectDir = project.projectDir
 
-        // 如果 packageOutputDirs 没有设置，动态获取
-        def outputDirs = packageOutputDirs
-        if (!outputDirs) {
-            outputDirs = ext.abis.collect { abi ->
-                project.layout.buildDirectory.dir("intermediates/conan-packages/${abi}").get().asFile
-            }
-        }
-
-        // 合并所有 ABI 的包路径映射
+        // 从 packageOutputDir 读取包路径映射
         def packageFoldersMap = [:]
-        outputDirs.each { outputDir ->
-            if (outputDir.exists()) {
-                def abi = outputDir.name  // 使用输出目录名作为 ABI 标识
-                logger.info ">> Processing package output dir: ${abi}"
-                outputDir.eachDir { packageDir ->
-                    def packageFile = new File(packageDir, 'package')
-                    if (packageFile.exists()) {
-                        // 存储为 Map<ABI, Map<PackageName, Path>>
-                        if (!packageFoldersMap[abi]) {
-                            packageFoldersMap[abi] = [:]
-                        }
-                        packageFoldersMap[abi][packageDir.name] = packageFile.text.trim()
-                    }
+        if (packageOutputDir.exists()) {
+            packageOutputDir.eachDir { packageDir ->
+                def packageFile = new File(packageDir, 'package')
+                if (packageFile.exists()) {
+                    packageFoldersMap[packageDir.name] = packageFile.text.trim()
                 }
             }
         }
-        logger.info ">> Package folders by ABI: ${packageFoldersMap.keySet()}"
+        logger.info ">> Package folders from collect: ${packageFoldersMap}"
 
         // 创建 Prefab 目录结构
         prefabDir.mkdirs()
@@ -87,7 +67,7 @@ class GenerateModulesTask extends DefaultTask {
         // 2. 为每个依赖生成 Prefab 模块
         def generatedModules = []
         dependencies.each { packageName ->
-            def moduleName = generatePrefabModule(packageName, packageFoldersMap, modulesDir, ext, abis)
+            def moduleName = generatePrefabModule(packageName, packageFoldersMap, modulesDir, abi, ext)
 
             if (moduleName) {
                 generatedModules << ":${moduleName}"
@@ -97,7 +77,7 @@ class GenerateModulesTask extends DefaultTask {
         logger.info ">> Generated modules: ${generatedModules}"
 
         // 3. 生成主库模块
-        generateLibraryModule(libraryName, libraryVersion, generatedModules, modulesDir, ext)
+        generateLibraryModule(libraryName, libraryVersion, generatedModules, modulesDir, abi, ext)
 
         // 4. 生成 prefab.json
         generatePrefabJson(prefabDir, libraryName, libraryVersion)
@@ -137,27 +117,15 @@ class GenerateModulesTask extends DefaultTask {
     /**
      * 生成单个 Prefab 模块
      */
-    String generatePrefabModule(String packageName, Map<String, Map<String, String>> packageFoldersMap,
-                               File modulesDir, ConanPrefabExtension ext, List<String> abis) {
-        // 使用小写键查找，与 CollectPackagesTask 保持一致
-        def packageNameLower = packageName.toLowerCase()
-        // 查找该包在任何 ABI 中是否存在
-        def packageFolder = null
-        def foundAbi = null
-        for (def abi : abis) {
-            if (packageFoldersMap[abi] && packageFoldersMap[abi][packageNameLower]) {
-                packageFolder = packageFoldersMap[abi][packageNameLower]
-                foundAbi = abi
-                break
-            }
-        }
-
+    String generatePrefabModule(String packageName, Map<String, String> packageFoldersMap,
+                               File modulesDir, String abi, ConanPrefabExtension ext) {
+        def packageFolder = packageFoldersMap[packageName]
         if (!packageFolder) {
-            logger.warn ">> Warning: ${packageName} package folder not found in any ABI"
+            logger.warn ">> Warning: ${packageName} package folder not found"
             return null
         }
 
-        logger.info ">> Generating prefab module for: ${packageName} (using ${foundAbi})"
+        logger.info ">> Generating prefab module for: ${packageName}"
 
         def libSrc = new File(packageFolder, 'lib')
         def includeSrc = new File(packageFolder, 'include')
@@ -166,7 +134,7 @@ class GenerateModulesTask extends DefaultTask {
         if (libSrc.exists() && libSrc.listFiles()) {
             libSrc.eachFile { file ->
                 if (file.name.endsWith('.so') || file.name.endsWith('.a')) {
-                    generateLibModule(file, includeSrc, packageName, packageFoldersMap, modulesDir, ext, abis)
+                    generateLibModule(file, includeSrc, packageName, modulesDir, abi, ext)
                 }
             }
             // 返回第一个库文件的模块名
@@ -186,12 +154,17 @@ class GenerateModulesTask extends DefaultTask {
      * 生成有二进制文件的模块
      */
     void generateLibModule(File libFile, File includeSrc, String packageName,
-                          Map<String, Map<String, String>> packageFoldersMap,
-                          File modulesDir, ConanPrefabExtension ext, List<String> abis) {
+                          File modulesDir, String abi, ConanPrefabExtension ext) {
         def libName = libFile.name.replaceAll(/\.(so|a)$/, '')
         def moduleName = libName.replaceFirst(/^lib/, '')
         def moduleDir = new File(modulesDir, moduleName)
-        moduleDir.mkdirs()
+        def libsDir = new File(moduleDir, "libs/android.${abi}")
+        libsDir.mkdirs()
+
+        // 复制库文件
+        Files.copy(libFile.toPath(), new File(libsDir, libFile.name).toPath(),
+                   java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        logger.info ">>   Created module: ${moduleName} (${libFile.name})"
 
         // 复制头文件
         if (includeSrc.exists()) {
@@ -204,44 +177,9 @@ class GenerateModulesTask extends DefaultTask {
             }
         }
 
-        // 从库文件名推断 ABI
-        def sourceAbi = null
-        ext.abis.each { abi ->
-            if (libFile.name.contains(abi.replace('-', '_'))) {
-                sourceAbi = abi
-                return
-            }
-        }
-
-        // 为每个 ABI 查找库文件并复制
-        def packageNameLower = packageName.toLowerCase()
-        for (def abi : abis) {
-            // 从 packageFoldersMap 查找对应 ABI 的库文件
-            def abiPackageFolder = null
-            if (packageFoldersMap[abi] && packageFoldersMap[abi][packageNameLower]) {
-                abiPackageFolder = packageFoldersMap[abi][packageNameLower]
-            }
-
-            if (abiPackageFolder) {
-                def abiLibSrc = new File(abiPackageFolder, 'lib')
-                if (abiLibSrc.exists()) {
-                    def abiLibFile = abiLibSrc.listFiles().find {
-                        it.name.endsWith('.so') || it.name.endsWith('.a')
-                    }
-                    if (abiLibFile) {
-                        def libsDir = new File(moduleDir, "libs/android.${abi}")
-                        libsDir.mkdirs()
-                        Files.copy(abiLibFile.toPath(), new File(libsDir, abiLibFile.name).toPath(),
-                                   java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-                        generateAbiJson(libsDir, abi, ext)
-                        logger.info ">>   Added library for ${packageName} ABI ${abi}: ${abiLibFile.name}"
-                    }
-                }
-            }
-        }
-
-        logger.info ">>   Created module: ${moduleName}"
+        // 生成 module.json 和 abi.json
         generateModuleJson(moduleDir, libName, [])
+        generateAbiJson(libsDir, abi, ext)
     }
 
     /**
@@ -271,36 +209,34 @@ class GenerateModulesTask extends DefaultTask {
      */
     void generateLibraryModule(String libraryName, String libraryVersion,
                               List<String> exportLibraries, File modulesDir,
-                              ConanPrefabExtension ext) {
+                              String abi, ConanPrefabExtension ext) {
         def moduleDir = new File(modulesDir, libraryName)
         moduleDir.mkdirs()
 
-        // 复制头文件（只执行一次）
-        def headersSrc = new File(project.projectDir, 'src/main/cpp/include')
-        if (headersSrc.exists()) {
-            def headersDest = new File(moduleDir, 'include')
-            headersDest.mkdirs()
-            project.copy {
-                from headersSrc
-                into headersDest
-                include '**/*.h'
-            }
-        }
-
-        // 为每个 ABI 查找库文件
+        // 查找库文件
         def buildDir = project.layout.buildDirectory.get().asFile
-        def anyLibFound = false
-        ext.abis.each { abi ->
-            def libFile = findLibraryFile(buildDir, abi, "lib${libraryName}.so")
-            if (libFile && libFile.exists()) {
-                anyLibFound = true
-                def libsDir = new File(moduleDir, "libs/android.${abi}")
-                libsDir.mkdirs()
-                Files.copy(libFile.toPath(), new File(libsDir, libFile.name).toPath(),
-                           java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-                generateAbiJson(libsDir, abi, ext)
-                logger.info ">>   Added library for ABI ${abi}: ${libFile.name}"
+        def libFile = findLibraryFile(buildDir, abi, "lib${libraryName}.so")
+
+        if (libFile && libFile.exists()) {
+            def libsDir = new File(moduleDir, "libs/android.${abi}")
+            libsDir.mkdirs()
+            Files.copy(libFile.toPath(), new File(libsDir, libFile.name).toPath(),
+                       java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+
+            // 复制头文件
+            def headersSrc = new File(project.projectDir, 'src/main/cpp/include')
+            if (headersSrc.exists()) {
+                def headersDest = new File(moduleDir, 'include')
+                headersDest.mkdirs()
+                project.copy {
+                    from headersSrc
+                    into headersDest
+                    include '**/*.h'
+                }
             }
+
+            // 生成 abi.json
+            generateAbiJson(libsDir, abi, ext)
         }
 
         // 生成 module.json
