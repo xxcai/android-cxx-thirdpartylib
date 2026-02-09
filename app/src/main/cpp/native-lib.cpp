@@ -4,6 +4,7 @@
 #include <openssl/sha.h>
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
+#include <spdlog/spdlog.h>
 #include "thirdparty_lib.h"
 
 extern "C" {
@@ -108,6 +109,15 @@ Java_com_thirdlib_app_MainActivity_nativeTestNlohmann(JNIEnv *env, jobject thiz)
     j["name"] = "test";
     j["value"] = 123;
     return env->NewStringUTF(("nlohmann_json:" + j.dump()).c_str());
+}
+
+// 测试 spdlog（通过prefab引入的头文件库）
+JNIEXPORT jstring JNICALL
+Java_com_thirdlib_app_MainActivity_nativeTestSpdlog(JNIEnv *env, jobject thiz) {
+    spdlog::info("Hello from spdlog!");
+    spdlog::warn("Warning message from spdlog");
+    spdlog::error("Error message from spdlog");
+    return env->NewStringUTF("spdlog_success");
 }
 
 }

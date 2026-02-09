@@ -332,6 +332,7 @@ def generateHeaderOnlyModule(File includeSrc, String packageName, String abi, Fi
         from includeSrc
         into includeDest
         include '**/*.hpp'
+        include '**/*.h'
     }
     println ">>   Created header-only module: ${moduleName}"
 
