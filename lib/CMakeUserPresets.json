@@ -4,7 +4,6 @@
         "conan": {}
     },
     "include": [
-        "build/armv8/Debug/generators/CMakePresets.json",
         "build/armv8/Release/generators/CMakePresets.json",
         "build/armv8/RelWithDebInfo/generators/CMakePresets.json"
     ]

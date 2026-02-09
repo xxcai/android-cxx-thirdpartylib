@@ -1,0 +1,38 @@
+plugins {
+    id 'groovy'
+    id 'java-gradle-plugin'
+}
+
+group = 'com.thirdlib'
+version = '1.0.0'
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+dependencies {
+    implementation gradleApi()
+    implementation 'com.android.tools.build:gradle-api:8.3.2'
+    implementation 'org.codehaus.groovy:groovy:3.0.22'
+    implementation 'org.codehaus.groovy:groovy-xml:3.0.22'
+    implementation 'org.apache.commons:commons-lang3:3.14.0'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+tasks.processResources {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+gradlePlugin {
+    plugins {
+        prefab {
+            id = 'com.thirdlib.prefab'
+            implementationClass = 'com.thirdlib.prefab.ConanPrefabPlugin'
+        }
+    }
+}

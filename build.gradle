@@ -2,6 +2,7 @@
 plugins {
     id 'com.android.library' version '8.3.2' apply false
     id 'com.android.application' version '8.3.2' apply false
+    id 'com.thirdlib.prefab' version '1.0.0' apply false
 }
 
 ext {
