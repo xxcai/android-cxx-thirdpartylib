@@ -5,6 +5,7 @@
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
+#include <fmt/core.h>
 #include "thirdparty_lib.h"
 
 extern "C" {
@@ -118,6 +119,18 @@ Java_com_thirdlib_app_MainActivity_nativeTestSpdlog(JNIEnv *env, jobject thiz) {
     spdlog::warn("Warning message from spdlog");
     spdlog::error("Error message from spdlog");
     return env->NewStringUTF("spdlog_success");
+}
+
+// 测试 fmt（通过prefab引入的头文件库）
+JNIEXPORT jstring JNICALL
+Java_com_thirdlib_app_MainActivity_nativeTestFmt(JNIEnv *env, jobject thiz, jstring input) {
+    const char* inputStr = env->GetStringUTFChars(input, nullptr);
+
+    // 使用 fmt 格式化字符串
+    std::string result = fmt::format("fmt_format:{}! Your value is {}", inputStr, 42);
+
+    env->ReleaseStringUTFChars(input, inputStr);
+    return env->NewStringUTF(result.c_str());
 }
 
 }

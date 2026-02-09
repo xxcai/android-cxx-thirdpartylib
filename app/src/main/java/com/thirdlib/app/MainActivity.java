@@ -25,6 +25,8 @@ public class MainActivity extends Activity {
     private native String nativeTestOpenSSL(String input);
     private native String nativeTestCurl();
     private native String nativeTestNlohmann();
+    private native String nativeTestSpdlog();
+    private native String nativeTestFmt(String input);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -88,6 +90,24 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 testNlohmann();
+            }
+        });
+
+        // 测试 spdlog
+        Button btnSpdlog = findViewById(R.id.btn_spdlog);
+        btnSpdlog.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                testSpdlog();
+            }
+        });
+
+        // 测试 fmt
+        Button btnFmt = findViewById(R.id.btn_fmt);
+        btnFmt.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                testFmt();
             }
         });
     }
@@ -172,6 +192,33 @@ public class MainActivity extends Activity {
     private void testNlohmann() {
         try {
             String result = nativeTestNlohmann();
+            Toast.makeText(this, result, Toast.LENGTH_SHORT).show();
+            Log.i(TAG, result);
+        } catch (Exception e) {
+            String msg = "Error: " + e.getMessage();
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            Log.e(TAG, msg);
+        }
+    }
+
+    // 测试 spdlog（通过prefab引入的头文件库）
+    private void testSpdlog() {
+        try {
+            String result = nativeTestSpdlog();
+            Toast.makeText(this, result, Toast.LENGTH_SHORT).show();
+            Log.i(TAG, result);
+        } catch (Exception e) {
+            String msg = "Error: " + e.getMessage();
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            Log.e(TAG, msg);
+        }
+    }
+
+    // 测试 fmt（通过prefab引入的头文件库）
+    private void testFmt() {
+        try {
+            String input = "Hello, fmt!";
+            String result = nativeTestFmt(input);
             Toast.makeText(this, result, Toast.LENGTH_SHORT).show();
             Log.i(TAG, result);
         } catch (Exception e) {

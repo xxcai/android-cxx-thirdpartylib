@@ -53,4 +53,18 @@
         android:layout_marginTop="16dp"
         android:text="Test nlohmann_json" />
 
+    <Button
+        android:id="@+id/btn_spdlog"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Test spdlog" />
+
+    <Button
+        android:id="@+id/btn_fmt"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Test fmt" />
+
 </LinearLayout>
