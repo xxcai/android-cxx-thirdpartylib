@@ -48,13 +48,10 @@ android {
     }
 }
 
-repositories {
-    maven {
-        url = uri("${rootDir}/../local-maven-repo")
-    }
-}
-
 dependencies {
     // 引入thirdpartylib包（包含thirdpartylib和zlib两个prefab模块）
     implementation 'com.thirdlib:thirdpartylib:1.0.0'
+
+    // RecyclerView
+    implementation 'androidx.recyclerview:recyclerview:1.3.2'
 }

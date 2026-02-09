@@ -11,60 +11,28 @@
         android:layout_height="wrap_content"
         android:textSize="16sp" />
 
-    <Button
-        android:id="@+id/btn_compress"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="Test Compression" />
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recycler_view"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="16dp" />
 
-    <Button
-        android:id="@+id/btn_add"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
+    <ScrollView
+        android:id="@+id/scroll_view"
+        android:layout_width="match_parent"
+        android:layout_height="150dp"
         android:layout_marginTop="16dp"
-        android:text="Test Native Add" />
+        android:background="#f0f0f0">
 
-    <Button
-        android:id="@+id/btn_zlib"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="Test Zlib (Prefab)" />
-
-    <Button
-        android:id="@+id/btn_openssl"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="Test OpenSSL (Prefab)" />
-
-    <Button
-        android:id="@+id/btn_curl"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="Test Curl" />
-
-    <Button
-        android:id="@+id/btn_nlohmann"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="Test nlohmann_json" />
-
-    <Button
-        android:id="@+id/btn_spdlog"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="Test spdlog" />
-
-    <Button
-        android:id="@+id/btn_fmt"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="Test fmt" />
+        <TextView
+            android:id="@+id/result_view"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="8dp"
+            android:text="测试结果..."
+            android:textSize="14sp"
+            android:fontFamily="monospace" />
+    </ScrollView>
 
 </LinearLayout>

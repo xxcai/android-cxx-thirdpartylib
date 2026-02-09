@@ -3,17 +3,26 @@ package com.thirdlib.app;
 import android.app.Activity;
 import android.os.Bundle;
 import android.util.Log;
-import android.view.View;
-import android.widget.Button;
+import android.widget.ScrollView;
 import android.widget.TextView;
-import android.widget.Toast;
+
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 import com.thirdlib.thirdpartylib.ThirdpartyLib;
+
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
 
 public class MainActivity extends Activity {
     private static final String TAG = "MainActivity";
     private ThirdpartyLib thirdpartyLib;
     private TextView textView;
+    private TextView resultView;
+    private ScrollView scrollView;
 
     static {
         System.loadLibrary("app");
@@ -35,81 +44,33 @@ public class MainActivity extends Activity {
 
         thirdpartyLib = new ThirdpartyLib();
         textView = findViewById(R.id.text_view);
+        resultView = findViewById(R.id.result_view);
+        scrollView = findViewById(R.id.scroll_view);
         textView.setText("ThirdpartyLib loaded successfully!\n" +
                          "Package: " + ThirdpartyLib.class.getPackage().getName() + "\n" +
-                         "Native library: thirdpartylib");
+                         "Native library: thirdparty");
 
-        // 测试app java -> lib java -> lib native
-        Button btnCompress = findViewById(R.id.btn_compress);
-        btnCompress.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                testCompression();
-            }
-        });
+        // 初始化测试项列表
+        List<TestItem> testItems = new ArrayList<>();
+        testItems.add(new TestItem("Test Compression", this::testCompression));
+        testItems.add(new TestItem("Test Native Add", this::testNativeAdd));
+        testItems.add(new TestItem("Test Zlib (Prefab)", this::testZlib));
+        testItems.add(new TestItem("Test OpenSSL (Prefab)", this::testOpenSSL));
+        testItems.add(new TestItem("Test Curl", this::testCurl));
+        testItems.add(new TestItem("Test nlohmann_json", this::testNlohmann));
+        testItems.add(new TestItem("Test spdlog", this::testSpdlog));
+        testItems.add(new TestItem("Test fmt", this::testFmt));
 
-        // 测试app java -> app native -> lib native
-        Button btnAdd = findViewById(R.id.btn_add);
-        btnAdd.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                testNativeAdd();
-            }
-        });
+        // 设置 RecyclerView
+        RecyclerView recyclerView = findViewById(R.id.recycler_view);
+        recyclerView.setLayoutManager(new LinearLayoutManager(this));
+        recyclerView.setAdapter(new TestAdapter(testItems));
+    }
 
-        // 测试app native直接调用zlib
-        Button btnZlib = findViewById(R.id.btn_zlib);
-        btnZlib.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                testZlib();
-            }
-        });
-
-        // 测试app native直接调用openssl
-        Button btnOpenssl = findViewById(R.id.btn_openssl);
-        btnOpenssl.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                testOpenSSL();
-            }
-        });
-
-        // 测试 curl
-        Button btnCurl = findViewById(R.id.btn_curl);
-        btnCurl.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                testCurl();
-            }
-        });
-
-        // 测试 nlohmann_json
-        Button btnNlohmann = findViewById(R.id.btn_nlohmann);
-        btnNlohmann.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                testNlohmann();
-            }
-        });
-
-        // 测试 spdlog
-        Button btnSpdlog = findViewById(R.id.btn_spdlog);
-        btnSpdlog.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                testSpdlog();
-            }
-        });
-
-        // 测试 fmt
-        Button btnFmt = findViewById(R.id.btn_fmt);
-        btnFmt.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                testFmt();
-            }
-        });
+    private void logResult(String msg) {
+        String timestamp = new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date());
+        resultView.append("[" + timestamp + "] " + msg + "\n");
+        scrollView.post(() -> scrollView.fullScroll(ScrollView.FOCUS_DOWN));
     }
 
     private void testCompression() {
@@ -118,16 +79,16 @@ public class MainActivity extends Activity {
             byte[] compressed = thirdpartyLib.compress(original);
             if (compressed != null) {
                 String msg = "Compression passed: " + original.length + " -> " + compressed.length + " bytes";
-                Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+                logResult(msg);
                 Log.i(TAG, msg);
             } else {
                 String msg = "Compression failed";
-                Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+                logResult(msg);
                 Log.e(TAG, msg);
             }
         } catch (Exception e) {
             String msg = "Error: " + e.getMessage();
-            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            logResult(msg);
             Log.e(TAG, msg);
         }
     }
@@ -138,92 +99,89 @@ public class MainActivity extends Activity {
             int b = 20;
             int result = nativeAdd(a, b);
             String msg = "Native add: " + a + " + " + b + " = " + result;
-            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            logResult(msg);
             Log.i(TAG, msg);
         } catch (Exception e) {
             String msg = "Error: " + e.getMessage();
-            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            logResult(msg);
             Log.e(TAG, msg);
         }
     }
 
-    // 测试app native直接调用zlib（通过prefab引入）
     private void testZlib() {
         try {
             String input = "Hello, Zlib! This is a test message for zlib compression.";
             String result = nativeTestZlib(input);
-            Toast.makeText(this, "Zlib test: " + result, Toast.LENGTH_SHORT).show();
-            Log.i(TAG, "Zlib test: " + result);
+            String msg = "Zlib test: " + result;
+            logResult(msg);
+            Log.i(TAG, msg);
         } catch (Exception e) {
             String msg = "Error: " + e.getMessage();
-            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            logResult(msg);
             Log.e(TAG, msg);
         }
     }
 
-    // 测试app native直接调用openssl（通过prefab引入）
     private void testOpenSSL() {
         try {
             String input = "Hello, OpenSSL!";
             String result = nativeTestOpenSSL(input);
-            Toast.makeText(this, "OpenSSL SHA256: " + result, Toast.LENGTH_SHORT).show();
-            Log.i(TAG, "OpenSSL test: " + result);
+            String msg = "OpenSSL SHA256: " + result;
+            logResult(msg);
+            Log.i(TAG, msg);
         } catch (Exception e) {
             String msg = "Error: " + e.getMessage();
-            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            logResult(msg);
             Log.e(TAG, msg);
         }
     }
 
-    // 测试 curl（通过prefab引入）
     private void testCurl() {
         try {
             String result = nativeTestCurl();
-            Toast.makeText(this, "Curl test: " + result, Toast.LENGTH_SHORT).show();
-            Log.i(TAG, "Curl test: " + result);
+            String msg = "Curl test: " + result;
+            logResult(msg);
+            Log.i(TAG, msg);
         } catch (Exception e) {
             String msg = "Error: " + e.getMessage();
-            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            logResult(msg);
             Log.e(TAG, msg);
         }
     }
 
-    // 测试 nlohmann_json（通过prefab引入的头文件库）
     private void testNlohmann() {
         try {
             String result = nativeTestNlohmann();
-            Toast.makeText(this, result, Toast.LENGTH_SHORT).show();
+            logResult(result);
             Log.i(TAG, result);
         } catch (Exception e) {
             String msg = "Error: " + e.getMessage();
-            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            logResult(msg);
             Log.e(TAG, msg);
         }
     }
 
-    // 测试 spdlog（通过prefab引入的头文件库）
     private void testSpdlog() {
         try {
             String result = nativeTestSpdlog();
-            Toast.makeText(this, result, Toast.LENGTH_SHORT).show();
+            logResult(result);
             Log.i(TAG, result);
         } catch (Exception e) {
             String msg = "Error: " + e.getMessage();
-            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            logResult(msg);
             Log.e(TAG, msg);
         }
     }
 
-    // 测试 fmt（通过prefab引入的头文件库）
     private void testFmt() {
         try {
             String input = "Hello, fmt!";
             String result = nativeTestFmt(input);
-            Toast.makeText(this, result, Toast.LENGTH_SHORT).show();
+            logResult(result);
             Log.i(TAG, result);
         } catch (Exception e) {
             String msg = "Error: " + e.getMessage();
-            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            logResult(msg);
             Log.e(TAG, msg);
         }
     }
