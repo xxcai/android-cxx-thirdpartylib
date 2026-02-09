@@ -25,13 +25,14 @@ class GenerateModulesTask extends DefaultTask {
     String libraryVersion
 
     @Input
-    String abi
+    List<String> abis
 
     /**
-     * Conan 包输出目录（由 CollectPackagesTask 生成）
+     * Conan 包输出目录 Map（ABI -> 输出目录）
+     * 每个 ABI 的包路径存储在对应的 packageOutputDir/{abi}/{packageName}/package 文件中
      */
-    @InputDirectory
-    File packageOutputDir
+    @Input
+    Map<String, File> packageOutputDirs = [:]
 
     @OutputDirectory
     File prefabDir
@@ -41,45 +42,49 @@ class GenerateModulesTask extends DefaultTask {
         def ext = project.extensions.findByType(ConanPrefabExtension)
         def projectDir = project.projectDir
 
-        // 从 packageOutputDir 读取包路径映射
-        def packageFoldersMap = [:]
-        if (packageOutputDir.exists()) {
-            packageOutputDir.eachDir { packageDir ->
-                def packageFile = new File(packageDir, 'package')
-                if (packageFile.exists()) {
-                    packageFoldersMap[packageDir.name] = packageFile.text.trim()
-                }
-            }
-        }
-        logger.info ">> Package folders from collect: ${packageFoldersMap}"
-
         // 创建 Prefab 目录结构
         prefabDir.mkdirs()
         def modulesDir = new File(prefabDir, 'modules')
         modulesDir.mkdirs()
 
-        logger.info ">> Generating prefab modules in: ${prefabDir}"
+        logger.info ">> Generating prefab modules for ABIs: ${abis}"
 
-        // 1. 解析 conanfile.py 获取依赖列表
+        // 解析 conanfile.py 获取依赖列表
         def dependencies = parseConanfilePy(new File(projectDir, conanfile))
         logger.info ">> Dependencies: ${dependencies}"
 
-        // 2. 为每个依赖生成 Prefab 模块
+        // 为每个 ABI 生成模块
         def generatedModules = []
-        dependencies.each { packageName ->
-            def moduleName = generatePrefabModule(packageName, packageFoldersMap, modulesDir, abi, ext)
+        abis.each { abi ->
+            def packageOutputDir = packageOutputDirs[abi]
 
-            if (moduleName) {
-                generatedModules << ":${moduleName}"
+            // 从 packageOutputDir 读取包路径映射
+            def packageFoldersMap = [:]
+            if (packageOutputDir?.exists()) {
+                packageOutputDir.eachDir { packageDir ->
+                    def packageFile = new File(packageDir, 'package')
+                    if (packageFile.exists()) {
+                        packageFoldersMap[packageDir.name] = packageFile.text.trim()
+                    }
+                }
+            }
+            logger.info ">> Package folders for ${abi}: ${packageFoldersMap.keySet()}"
+
+            // 为每个依赖生成 Prefab 模块
+            dependencies.each { packageName ->
+                def moduleName = generatePrefabModule(packageName, packageFoldersMap, modulesDir, abi, ext)
+                if (moduleName && !generatedModules.contains(moduleName)) {
+                    generatedModules << moduleName
+                }
             }
         }
 
         logger.info ">> Generated modules: ${generatedModules}"
 
-        // 3. 生成主库模块
-        generateLibraryModule(libraryName, libraryVersion, generatedModules, modulesDir, abi, ext)
+        // 生成主库模块
+        generateLibraryModule(libraryName, libraryVersion, generatedModules, modulesDir, abis, ext)
 
-        // 4. 生成 prefab.json
+        // 生成 prefab.json
         generatePrefabJson(prefabDir, libraryName, libraryVersion)
     }
 
@@ -209,34 +214,37 @@ class GenerateModulesTask extends DefaultTask {
      */
     void generateLibraryModule(String libraryName, String libraryVersion,
                               List<String> exportLibraries, File modulesDir,
-                              String abi, ConanPrefabExtension ext) {
+                              List<String> abis, ConanPrefabExtension ext) {
         def moduleDir = new File(modulesDir, libraryName)
         moduleDir.mkdirs()
 
-        // 查找库文件
-        def buildDir = project.layout.buildDirectory.get().asFile
-        def libFile = findLibraryFile(buildDir, abi, "lib${libraryName}.so")
-
-        if (libFile && libFile.exists()) {
-            def libsDir = new File(moduleDir, "libs/android.${abi}")
-            libsDir.mkdirs()
-            Files.copy(libFile.toPath(), new File(libsDir, libFile.name).toPath(),
-                       java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-
-            // 复制头文件
-            def headersSrc = new File(project.projectDir, 'src/main/cpp/include')
-            if (headersSrc.exists()) {
-                def headersDest = new File(moduleDir, 'include')
-                headersDest.mkdirs()
-                project.copy {
-                    from headersSrc
-                    into headersDest
-                    include '**/*.h'
-                }
+        // 复制头文件（只复制一次）
+        def headersSrc = new File(project.projectDir, 'src/main/cpp/include')
+        if (headersSrc.exists()) {
+            def headersDest = new File(moduleDir, 'include')
+            headersDest.mkdirs()
+            project.copy {
+                from headersSrc
+                into headersDest
+                include '**/*.h'
             }
+        }
 
-            // 生成 abi.json
-            generateAbiJson(libsDir, abi, ext)
+        // 为每个 ABI 查找并复制库文件
+        def buildDir = project.layout.buildDirectory.get().asFile
+        abis.each { abi ->
+            def libFile = findLibraryFile(buildDir, abi, "lib${libraryName}.so")
+
+            if (libFile && libFile.exists()) {
+                def libsDir = new File(moduleDir, "libs/android.${abi}")
+                libsDir.mkdirs()
+                Files.copy(libFile.toPath(), new File(libsDir, libFile.name).toPath(),
+                           java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+
+                // 生成 abi.json
+                generateAbiJson(libsDir, abi, ext)
+                logger.info ">>   Copied ${libraryName} for ${abi}"
+            }
         }
 
         // 生成 module.json

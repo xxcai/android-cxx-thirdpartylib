@@ -64,7 +64,7 @@ class ConanPrefabPlugin implements Plugin<Project> {
             task.conanfile = extension.conanfile
             task.profile = extension.profile
             task.buildType = extension.buildTypes.first()
-            task.abi = extension.abis.first()
+            task.abis = extension.abis
         }
         collectPackagesTask.configure { it.dependsOn conanInstallTask }
 
@@ -72,10 +72,21 @@ class ConanPrefabPlugin implements Plugin<Project> {
             task.conanfile = extension.conanfile
             task.libraryName = extension.libraryName
             task.libraryVersion = extension.libraryVersion
-            task.abi = extension.abis.first()
+            task.abis = extension.abis
             task.prefabDir = project.layout.buildDirectory.dir("intermediates/prefab/${extension.buildTypes.first()}").get().asFile
-            task.packageOutputDir = collectPackagesTask.get().packageOutputDir
         }
+
+        // 在配置阶段后传递 packageOutputDirs
+        project.afterEvaluate {
+            generateModulesTask.configure { task ->
+                def abiToOutputDir = [:]
+                extension.abis.each { abi ->
+                    abiToOutputDir[abi] = new File(collectPackagesTask.get().packageOutputDir, abi)
+                }
+                task.packageOutputDirs = abiToOutputDir
+            }
+        }
+
         generateModulesTask.configure {
             it.dependsOn collectPackagesTask
             it.dependsOn 'externalNativeBuildRelease'
@@ -93,15 +104,24 @@ class ConanPrefabPlugin implements Plugin<Project> {
         project.afterEvaluate {
             def packageTask = project.tasks.find { it.name == 'bundleReleaseAar' }
             if (packageTask) {
+                // 让 injectAarTask 在 bundleReleaseAar 之后执行
+                // 先确保 bundleReleaseAar 生成原始 AAR
+                injectAarTask.configure {
+                    it.dependsOn packageTask
+                }
+
                 // 让 assembleRelease 任务依赖 injectAarTask
                 project.tasks.named('assembleRelease') { task ->
                     task.dependsOn injectAarTask
                 }
 
-                // inject 任务依赖 bundleReleaseAar，因为需要等 AAR 生成后再注入
+                // 让 publish 任务也依赖 injectAarTask，确保发布的 AAR 包含 prefab
+                project.tasks.named('publish') { task ->
+                    task.dependsOn injectAarTask
+                }
+
+                // inject 任务依赖 generateModulesTask，确保 prefab 目录已生成
                 injectAarTask.configure {
-                    it.dependsOn packageTask
-                    // 同时依赖 generateModulesTask，确保 prefab 目录已生成
                     it.dependsOn generateModulesTask
                 }
             }
