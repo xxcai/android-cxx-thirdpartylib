@@ -18,7 +18,7 @@ class CollectPackagesTask extends DefaultTask {
      * 每个包的路径存储在 packageOutputDir/{packageName}/package 文件中
      */
     @OutputDirectory
-    File packageOutputDir = new File(project.buildDir, 'conan-packages')
+    File packageOutputDir
 
     @Input
     String conanfile

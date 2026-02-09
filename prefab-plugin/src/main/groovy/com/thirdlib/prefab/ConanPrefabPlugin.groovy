@@ -45,52 +45,62 @@ class ConanPrefabPlugin implements Plugin<Project> {
             throw new IllegalStateException('Plugin must be applied after com.android.library')
         }
 
-        // 自动添加 RelWithDebInfo 到 buildTypes（如果包含 Release）
-        if (extension.buildTypes.contains('Release') && !extension.buildTypes.contains('RelWithDebInfo')) {
-            extension.buildTypes = new ArrayList<>(extension.buildTypes)
-            extension.buildTypes.add('RelWithDebInfo')
-            project.logger.info ">> Added RelWithDebInfo to buildTypes because Release is present"
-        }
-
-        // 创建任务
-        def conanInstallTask = project.tasks.register('conanInstall', ConanInstallTask) { task ->
-            task.conanfile = extension.conanfile
-            task.profile = extension.profile
-            task.abis = extension.abis
-            task.buildTypes = extension.buildTypes
-        }
-
-        def collectPackagesTask = project.tasks.register('collectConanPackages', CollectPackagesTask) { task ->
-            task.conanfile = extension.conanfile
-            task.profile = extension.profile
-            task.buildType = extension.buildTypes.first()
-            task.abi = extension.abis.first()
-        }
-        collectPackagesTask.configure { it.dependsOn conanInstallTask }
-
-        def generateModulesTask = project.tasks.register('generateConanPrefab', GenerateModulesTask) { task ->
-            task.conanfile = extension.conanfile
-            task.libraryName = extension.libraryName
-            task.libraryVersion = extension.libraryVersion
-            task.abi = extension.abis.first()
-            task.prefabDir = project.layout.buildDirectory.dir("intermediates/prefab/${extension.buildTypes.first()}").get().asFile
-            task.packageOutputDir = collectPackagesTask.get().packageOutputDir
-        }
-        generateModulesTask.configure {
-            it.dependsOn collectPackagesTask
-            it.dependsOn 'externalNativeBuildRelease'
-        }
-
-        // AAR 输出文件路径 (AGP 8.x 的输出格式)
-        def aarOutputFile = project.layout.buildDirectory.file("outputs/aar/lib-release.aar")
-
-        def injectAarTask = project.tasks.register('injectConanPrefabIntoAar', InjectAarTask) { task ->
-            task.prefabDir = generateModulesTask.get().prefabDir
-            task.aarFiles = project.files(aarOutputFile)
-        }
-
-        // 拦截 AAR 打包任务
+        // 等待配置完成后创建任务
         project.afterEvaluate {
+            // 自动添加 RelWithDebInfo 到 buildTypes（如果包含 Release）
+            if (extension.buildTypes.contains('Release') && !extension.buildTypes.contains('RelWithDebInfo')) {
+                extension.buildTypes = new ArrayList<>(extension.buildTypes)
+                extension.buildTypes.add('RelWithDebInfo')
+                project.logger.info ">> Added RelWithDebInfo to buildTypes because Release is present"
+            }
+
+            project.logger.info ">> Prefab plugin abis: ${extension.abis}"
+
+            // 创建 conanInstall 任务
+            def conanInstallTask = project.tasks.register('conanInstall', ConanInstallTask) { task ->
+                task.conanfile = extension.conanfile
+                task.profile = extension.profile
+                task.abis = extension.abis
+                task.buildTypes = extension.buildTypes
+            }
+
+            // 为每个 ABI 创建 collect 任务
+            def collectTasks = []
+            extension.abis.each { abi ->
+                def taskName = "collectConanPackages${abi.replace('-', '_').capitalize()}"
+                def collectTask = project.tasks.register(taskName, CollectPackagesTask) { task ->
+                    task.conanfile = extension.conanfile
+                    task.profile = extension.profile
+                    task.buildType = extension.buildTypes.first()
+                    task.abi = abi
+                    // 每个任务的输出目录不同
+                    task.packageOutputDir = project.layout.buildDirectory.dir("intermediates/conan-packages/${abi}").get().asFile
+                }
+                collectTask.configure { it.dependsOn conanInstallTask }
+                collectTasks << collectTask
+            }
+
+            def generateModulesTask = project.tasks.register('generateConanPrefab', GenerateModulesTask) { task ->
+                task.conanfile = extension.conanfile
+                task.libraryName = extension.libraryName
+                task.libraryVersion = extension.libraryVersion
+                task.abis = extension.abis
+                task.prefabDir = project.layout.buildDirectory.dir("intermediates/prefab/${extension.buildTypes.first()}").get().asFile
+            }
+            generateModulesTask.configure {
+                collectTasks.each { task -> it.dependsOn task }
+                it.dependsOn 'externalNativeBuildRelease'
+            }
+
+            // AAR 输出文件路径 (AGP 8.x 的输出格式)
+            def aarOutputFile = project.layout.buildDirectory.file("outputs/aar/lib-release.aar")
+
+            def injectAarTask = project.tasks.register('injectConanPrefabIntoAar', InjectAarTask) { task ->
+                task.prefabDir = generateModulesTask.get().prefabDir
+                task.aarFiles = project.files(aarOutputFile)
+            }
+
+            // 配置 AAR 打包任务依赖
             def packageTask = project.tasks.find { it.name == 'bundleReleaseAar' }
             if (packageTask) {
                 // 让 assembleRelease 任务依赖 injectAarTask
@@ -105,11 +115,11 @@ class ConanPrefabPlugin implements Plugin<Project> {
                     it.dependsOn generateModulesTask
                 }
             }
-        }
 
-        // 配置 conanInstall 在构建前执行
-        project.tasks.named('preBuild').configure {
-            it.dependsOn conanInstallTask
+            // 配置 conanInstall 在构建前执行
+            project.tasks.named('preBuild').configure {
+                it.dependsOn conanInstallTask
+            }
         }
     }
 }
