@@ -3,7 +3,6 @@ package com.thirdlib.prefab.tasks
 import com.thirdlib.prefab.ConanPrefabExtension
 import org.gradle.api.DefaultTask
 import org.gradle.api.tasks.Input
-import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.TaskAction
 
@@ -72,9 +71,30 @@ class GenerateModulesTask extends DefaultTask {
 
             // 为每个依赖生成 Prefab 模块
             dependencies.each { packageName ->
-                def moduleName = generatePrefabModule(packageName, packageFoldersMap, modulesDir, abi, ext)
-                if (moduleName && !generatedModules.contains(moduleName)) {
-                    generatedModules << moduleName
+                generatePrefabModule(packageName, packageFoldersMap, modulesDir, abi, ext)
+
+                // 收集该包下所有库文件的模块名（支持一个包生成多个模块，如 openssl -> ssl, crypto）
+                // 同时也收集纯头文件库（如 nlohmann_json, spdlog, fmt）
+                def packageFolder = packageFoldersMap[packageName]
+                if (packageFolder) {
+                    def libSrc = new File(packageFolder, 'lib')
+                    def includeSrc = new File(packageFolder, 'include')
+                    if (libSrc.exists() && libSrc.listFiles()) {
+                        // 有二进制文件的库
+                        libSrc.eachFile { file ->
+                            if (file.name.endsWith('.so') || file.name.endsWith('.a')) {
+                                def moduleName = file.name.replaceAll(/\.(so|a)$/, '').replaceFirst(/^lib/, '')
+                                if (!generatedModules.contains(moduleName)) {
+                                    generatedModules << moduleName
+                                }
+                            }
+                        }
+                    } else if (includeSrc.exists()) {
+                        // 纯头文件库，使用包名作为模块名
+                        if (!generatedModules.contains(packageName)) {
+                            generatedModules << packageName
+                        }
+                    }
                 }
             }
         }
@@ -82,7 +102,9 @@ class GenerateModulesTask extends DefaultTask {
         logger.info ">> Generated modules: ${generatedModules}"
 
         // 生成主库模块
-        generateLibraryModule(libraryName, libraryVersion, generatedModules, modulesDir, abis, ext)
+        // 将库名转换为完整 CMake target 名称（加前缀 "libraryName::"），以便 Prefab 正确传递头文件路径
+        def exportLibraries = generatedModules.collect { "${libraryName}::${it}" }
+        generateLibraryModule(libraryName, libraryVersion, exportLibraries, modulesDir, abis, ext)
 
         // 生成 prefab.json
         generatePrefabJson(prefabDir, libraryName, libraryVersion)
@@ -178,6 +200,7 @@ class GenerateModulesTask extends DefaultTask {
             project.copy {
                 from includeSrc
                 into includeDest
+                include '**/*.hpp'
                 include '**/*.h'
             }
         }
@@ -226,6 +249,7 @@ class GenerateModulesTask extends DefaultTask {
             project.copy {
                 from headersSrc
                 into headersDest
+                include '**/*.hpp'
                 include '**/*.h'
             }
         }
