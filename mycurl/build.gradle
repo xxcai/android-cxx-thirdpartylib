@@ -22,7 +22,6 @@ android {
                 cppFlags '-v'
                 arguments "-DANDROID_STL=c++_shared"
             }
-            experimentalProperties.put("prefab.mycurl.exportLibraries", ["thirdpartylib::curl"])
         }
     }
 
