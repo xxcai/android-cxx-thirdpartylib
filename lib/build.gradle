@@ -4,7 +4,7 @@ plugins {
     id 'com.thirdlib.prefab'
 }
 
-prefab {
+conanPrefab {
     libraryName = 'thirdpartylib'
     libraryVersion = '1.0.0'
     conanfile = 'conanfile.py'
@@ -12,6 +12,9 @@ prefab {
     abis = ['arm64-v8a', 'armeabi-v7a']
     minSdk = 26
     stl = 'c++_shared'
+
+    // 场景1：Conan 注入 Prefab
+    injectConanPrefab = true
 }
 
 android {

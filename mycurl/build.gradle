@@ -1,6 +1,7 @@
 plugins {
     id 'com.android.library'
     id 'maven-publish'
+    id 'com.thirdlib.prefab'
 }
 
 android {
@@ -63,42 +64,11 @@ dependencies {
 // Maven 发布配置
 apply from: 'mycurl-publish.gradle'
 
-// AAR 后处理：排除传递依赖的 .so，只保留自己生成的
-def libName = "lib${project.name}.so"
+// 场景2：清理传递依赖的 .so
+conanPrefab {
+    libraryName = 'mycurl'
 
-// 拦截 bundleReleaseAar 任务，清理不需要的 .so
-project.afterEvaluate {
-    def bundleTask = project.tasks.find { it.name == 'bundleReleaseAar' }
-    if (bundleTask) {
-        bundleTask.doLast {
-            def aarFile = bundleTask.outputs.files.singleFile
-            def buildDir = project.layout.buildDirectory.get().asFile
-            def tempDir = new File(buildDir, "temp-aar-cleanup")
-
-            // 1. 解压 AAR
-            project.delete(tempDir)
-            tempDir.mkdirs()
-            project.copy {
-                from project.zipTree(aarFile)
-                into tempDir
-            }
-
-            // 2. 删除传递依赖的 .so（保留自己的 libmycurl.so）
-            new File(tempDir, "jni").eachDir { abiDir ->
-                project.fileTree(abiDir).matching {
-                    include "*.so"
-                    exclude { it.file.name == libName }
-                }.each { file ->
-                    println "[mycurl] 排除传递依赖的 .so: ${file.name}"
-                    project.delete(file)
-                }
-            }
-
-            // 3. 重新打包 AAR
-            project.delete(aarFile)
-            ant.zip(destfile: aarFile.absolutePath, basedir: tempDir.absolutePath)
-            project.delete(tempDir)
-            println "[mycurl] AAR 清理完成：已排除传递依赖的 .so，只保留 ${libName}"
-        }
-    }
+    // 场景控制
+    injectConanPrefab = false     // 关闭场景1
+    cleanTransitiveJniLibs = true  // 开启场景2
 }
