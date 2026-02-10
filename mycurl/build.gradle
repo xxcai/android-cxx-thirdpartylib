@@ -1,0 +1,104 @@
+plugins {
+    id 'com.android.library'
+    id 'maven-publish'
+}
+
+android {
+    namespace 'com.thirdlib.mycurl'
+    compileSdk rootProject.ext.compileSdk
+
+    defaultConfig {
+        minSdk rootProject.ext.minSdk
+        targetSdk rootProject.ext.targetSdk
+        ndkVersion rootProject.ext.ndkVersion
+
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a'
+        }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags '-v'
+                arguments "-DANDROID_STL=c++_shared"
+            }
+            experimentalProperties.put("prefab.mycurl.exportLibraries", ["thirdpartylib::curl"])
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    buildFeatures {
+        prefab true
+        prefabPublishing true
+    }
+
+    prefab {
+        mycurl {
+            headers = "src/main/cpp"
+            libraryName = "libmycurl"
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path 'CMakeLists.txt'
+            version '3.22.1'
+        }
+    }
+
+    publishing {
+        singleVariant("release")
+    }
+}
+
+dependencies {
+    // mycurl 编译时使用 lib 的 Prefab 获取 curl
+    implementation 'com.thirdlib:thirdpartylib:1.0.0'
+}
+
+// Maven 发布配置
+apply from: 'mycurl-publish.gradle'
+
+// AAR 后处理：排除传递依赖的 .so，只保留自己生成的
+def libName = "lib${project.name}.so"
+
+// 拦截 bundleReleaseAar 任务，清理不需要的 .so
+project.afterEvaluate {
+    def bundleTask = project.tasks.find { it.name == 'bundleReleaseAar' }
+    if (bundleTask) {
+        bundleTask.doLast {
+            def aarFile = bundleTask.outputs.files.singleFile
+            def buildDir = project.layout.buildDirectory.get().asFile
+            def tempDir = new File(buildDir, "temp-aar-cleanup")
+
+            // 1. 解压 AAR
+            project.delete(tempDir)
+            tempDir.mkdirs()
+            project.copy {
+                from project.zipTree(aarFile)
+                into tempDir
+            }
+
+            // 2. 删除传递依赖的 .so（保留自己的 libmycurl.so）
+            new File(tempDir, "jni").eachDir { abiDir ->
+                project.fileTree(abiDir).matching {
+                    include "*.so"
+                    exclude { it.file.name == libName }
+                }.each { file ->
+                    println "[mycurl] 排除传递依赖的 .so: ${file.name}"
+                    project.delete(file)
+                }
+            }
+
+            // 3. 重新打包 AAR
+            project.delete(aarFile)
+            ant.zip(destfile: aarFile.absolutePath, basedir: tempDir.absolutePath)
+            project.delete(tempDir)
+            println "[mycurl] AAR 清理完成：已排除传递依赖的 .so，只保留 ${libName}"
+        }
+    }
+}

@@ -1,0 +1,37 @@
+publishing {
+    publications {
+        release(MavenPublication) {
+            afterEvaluate {
+                from components.release
+            }
+
+            groupId = 'com.thirdlib'
+            artifactId = 'mycurl'
+            version = '1.0.0'
+
+            pom {
+                name = 'mycurl'
+                description = 'C++ HTTP Client Library based on libcurl'
+                licenses {
+                    license {
+                        name = 'MIT'
+                        url = 'https://opensource.org/licenses/MIT'
+                    }
+                }
+                developers {
+                    developer {
+                        id = 'developer'
+                        name = 'Developer'
+                        email = 'developer@example.com'
+                    }
+                }
+            }
+        }
+    }
+
+    repositories {
+        maven {
+            url = uri("${rootDir}/local-maven-repo")
+        }
+    }
+}

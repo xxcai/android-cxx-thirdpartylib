@@ -36,6 +36,9 @@ public class MainActivity extends Activity {
     private native String nativeTestNlohmann();
     private native String nativeTestSpdlog();
     private native String nativeTestFmt(String input);
+    // mycurl 封装测试
+    private native String nativeTestMycurlGet();
+    private native String nativeTestMycurlPost();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -56,7 +59,9 @@ public class MainActivity extends Activity {
         testItems.add(new TestItem("Test Native Add", this::testNativeAdd));
         testItems.add(new TestItem("Test Zlib (Prefab)", this::testZlib));
         testItems.add(new TestItem("Test OpenSSL (Prefab)", this::testOpenSSL));
-        testItems.add(new TestItem("Test Curl", this::testCurl));
+        testItems.add(new TestItem("Test Curl (Direct)", this::testCurl));
+        testItems.add(new TestItem("Test mycurl GET", this::testMycurlGet));
+        testItems.add(new TestItem("Test mycurl POST", this::testMycurlPost));
         testItems.add(new TestItem("Test nlohmann_json", this::testNlohmann));
         testItems.add(new TestItem("Test spdlog", this::testSpdlog));
         testItems.add(new TestItem("Test fmt", this::testFmt));
@@ -177,6 +182,32 @@ public class MainActivity extends Activity {
         try {
             String input = "Hello, fmt!";
             String result = nativeTestFmt(input);
+            logResult(result);
+            Log.i(TAG, result);
+        } catch (Exception e) {
+            String msg = "Error: " + e.getMessage();
+            logResult(msg);
+            Log.e(TAG, msg);
+        }
+    }
+
+    // mycurl 封装测试 - HTTP GET
+    private void testMycurlGet() {
+        try {
+            String result = nativeTestMycurlGet();
+            logResult(result);
+            Log.i(TAG, result);
+        } catch (Exception e) {
+            String msg = "Error: " + e.getMessage();
+            logResult(msg);
+            Log.e(TAG, msg);
+        }
+    }
+
+    // mycurl 封装测试 - HTTP POST
+    private void testMycurlPost() {
+        try {
+            String result = nativeTestMycurlPost();
             logResult(result);
             Log.i(TAG, result);
         } catch (Exception e) {

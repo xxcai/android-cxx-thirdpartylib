@@ -8,6 +8,9 @@
 #include <fmt/core.h>
 #include "thirdparty_lib.h"
 
+// mycurl 封装测试
+#include <mycurl.h>
+
 extern "C" {
 
 JNIEXPORT jint JNICALL
@@ -130,6 +133,52 @@ Java_com_thirdlib_app_MainActivity_nativeTestFmt(JNIEnv *env, jobject thiz, jstr
     std::string result = fmt::format("fmt_format:{}! Your value is {}", inputStr, 42);
 
     env->ReleaseStringUTFChars(input, inputStr);
+    return env->NewStringUTF(result.c_str());
+}
+
+// 测试 mycurl 封装 - HTTP GET
+JNIEXPORT jstring JNICALL
+Java_com_thirdlib_app_MainActivity_nativeTestMycurlGet(JNIEnv *env, jobject thiz) {
+    mycurl::MyCurl client;
+
+    // 禁用 SSL 验证（用于测试）
+    client.setSSLVerify(false);
+
+    mycurl::Response response = client.get("https://httpbin.org/get");
+
+    std::string result = "mycurl_get:code:" + std::to_string(response.code);
+    if (!response.error.empty()) {
+        result += ",error:" + response.error;
+    }
+    if (!response.body.empty()) {
+        // 截取响应体前100个字符
+        std::string bodyPreview = response.body.substr(0, std::min(size_t(100), response.body.size()));
+        result += ",body:" + bodyPreview;
+    }
+
+    return env->NewStringUTF(result.c_str());
+}
+
+// 测试 mycurl 封装 - HTTP POST
+JNIEXPORT jstring JNICALL
+Java_com_thirdlib_app_MainActivity_nativeTestMycurlPost(JNIEnv *env, jobject thiz) {
+    mycurl::MyCurl client;
+
+    // 禁用 SSL 验证（用于测试）
+    client.setSSLVerify(false);
+
+    std::string postData = "{\"test\":\"mycurl_post\",\"value\":42}";
+    mycurl::Response response = client.post("https://httpbin.org/post", postData);
+
+    std::string result = "mycurl_post:code:" + std::to_string(response.code);
+    if (!response.error.empty()) {
+        result += ",error:" + response.error;
+    }
+    if (!response.body.empty()) {
+        std::string bodyPreview = response.body.substr(0, std::min(size_t(100), response.body.size()));
+        result += ",body:" + bodyPreview;
+    }
+
     return env->NewStringUTF(result.c_str());
 }
 

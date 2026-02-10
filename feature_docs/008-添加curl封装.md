@@ -118,24 +118,58 @@ mycurl Prefab 模块
 | ABIs | arm64-v8a, armeabi-v7a |
 
 ### 3.3 Consumer 使用方式
+
+#### 3.3.1 Gradle 依赖配置
 ```groovy
 // app/build.gradle
+
+android {
+    // ... 其他配置
+
+    buildFeatures {
+        prefab true  // 必须启用 prefab
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+}
+
 dependencies {
-    implementation 'com.thirdlib:thirdpartylib:1.0.0'  // 提供 curl
-    implementation 'com.thirdlib:mycurl:1.0.0'         // 提供 mycurl
+    // 引入 thirdpartylib 包（包含 thirdpartylib、zlib、ssl、crypto、curl 模块）
+    implementation 'com.thirdlib:thirdpartylib:1.0.0'
+
+    // 引入 mycurl 包（只包含 libmycurl.so，不包含传递依赖）
+    implementation 'com.thirdlib:mycurl:1.0.0'
 }
 ```
 
+#### 3.3.2 CMake 配置
 ```cmake
 # app/src/main/cpp/CMakeLists.txt
-find_package(thirdpartylib REQUIRED CONFIG)
-find_package(mycurl REQUIRED CONFIG)
+cmake_minimum_required(VERSION 3.22.1)
+project(app)
 
+# 引入 Prefab 依赖
+find_package(thirdpartylib REQUIRED CONFIG)  # 提供 curl、ssl、crypto、z 等
+find_package(mycurl REQUIRED CONFIG)        # 提供 mycurl 封装
+
+add_library(app SHARED native-lib.cpp)
+
+# 链接 Prefab 模块
 target_link_libraries(app
-    thirdpartylib::thirdpartylib  # 或直接 thirdpartylib::curl
-    mycurl::mycurl
+    thirdpartylib::thirdpartylib  # 或直接使用 thirdpartylib::curl
+    mycurl::mycurl               # mycurl 封装层
 )
 ```
+
+**关键点**：
+- `buildFeatures.prefab true` 必须启用
+- App **同时依赖** `thirdpartylib` 和 `mycurl`
+- `thirdpartylib` 提供 curl 等 Native 库
+- `mycurl` 提供简洁的 HTTP 封装接口
 
 ## 4. 实现方案（方案B）
 
@@ -147,16 +181,7 @@ target_link_libraries(app
 plugins {
     id 'com.android.library'
     id 'maven-publish'
-    id 'com.thirdlib.prefab'
-}
-
-prefab {
-    libraryName = 'mycurl'
-    libraryVersion = '1.0.0'
-    abis = ['arm64-v8a', 'armeabi-v7a']
-    minSdk = 26
-    stl = 'c++_shared'
-    // 注意：不使用 Conan，curl 通过 lib 的 Prefab 传递
+    // 注意：不使用 com.thirdlib.prefab 插件，使用 AGP 内置 prefab 支持
 }
 
 android {
@@ -186,11 +211,27 @@ android {
         }
     }
 
+    // 使用 AGP 内置 prefab 支持
+    buildFeatures {
+        prefab true
+        prefabPublishing true
+    }
+
+    // 单模块配置
+    prefab {
+        mycurl {
+            headers = "src/main/cpp"
+            libraryName = "libmycurl"
+        }
+    }
+
     externalNativeBuild {
         cmake {
-            path 'CMakeLists.txt'
-            version '3.22.1'
+            cppFlags '-v'
+            arguments "-DANDROID_STL=c++_shared"
         }
+        // 配置 export_libraries，声明依赖的 Prefab 模块
+        experimentalProperties.put("prefab.mycurl.exportLibraries", ["thirdpartylib::curl"])
     }
 
     publishing {
@@ -208,8 +249,10 @@ apply from: 'mycurl-publish.gradle'
 ```
 
 **关键点**：
-- prefab 配置中**不指定** `conanfile` 和 `profile`，不使用 Conan
-- `thirdpartylib:1.0.0` 是前置依赖，确保 lib 先发布
+- 使用 AGP 内置 Prefab：`buildFeatures.prefab true` + `prefabPublishing true`
+- 无需 `com.thirdlib.prefab` 插件
+- `experimentalProperties.put("prefab.mycurl.exportLibraries", ...)` 声明 Prefab 依赖
+- `thirdpartylib:1.0.0` 是 Gradle 依赖，确保编译时能找到 curl
 
 #### 4.1.2 CMakeLists.txt
 ```cmake
@@ -273,6 +316,62 @@ publishing {
 }
 ```
 
+#### 4.1.4 AAR 后处理（排除传递依赖的 .so）
+
+**问题**：mycurl AAR 中会包含两类 .so 文件：
+- `libmycurl.so` - mycurl 自己生成的，**保留**
+- `libcurl.so`, `libssl.so`, `libcrypto.so` 等 - 来自 thirdpartylib::curl 的传递依赖，**应排除**
+
+**原因**：`packaging.jniLibs.excludes` 对 Library 模块不生效，需要通过后处理排除。
+
+```groovy
+// mycurl/build.gradle 末尾添加
+
+def libName = "lib${project.name}.so"
+
+// 拦截 bundleReleaseAar 任务，清理不需要的 .so
+project.afterEvaluate {
+    def bundleTask = project.tasks.find { it.name == 'bundleReleaseAar' }
+    if (bundleTask) {
+        bundleTask.doLast {
+            def aarFile = bundleTask.outputs.files.singleFile
+            def buildDir = project.layout.buildDirectory.get().asFile
+            def tempDir = new File(buildDir, "temp-aar-cleanup")
+
+            // 1. 解压 AAR
+            project.delete(tempDir)
+            tempDir.mkdirs()
+            project.copy {
+                from project.zipTree(aarFile)
+                into tempDir
+            }
+
+            // 2. 删除传递依赖的 .so（保留自己的 libmycurl.so）
+            new File(tempDir, "jni").eachDir { abiDir ->
+                project.fileTree(abiDir).matching {
+                    include "*.so"
+                    exclude { it.file.name == libName }
+                }.each { file ->
+                    println "[mycurl] 排除传递依赖的 .so: ${file.name}"
+                    project.delete(file)
+                }
+            }
+
+            // 3. 重新打包 AAR
+            project.delete(aarFile)
+            ant.zip(destfile: aarFile.absolutePath, basedir: tempDir.absolutePath)
+            project.delete(tempDir)
+            println "[mycurl] AAR 清理完成：已排除传递依赖的 .so，只保留 ${libName}"
+        }
+    }
+}
+```
+
+**关键点**：
+- 动态获取库名 `lib${project.name}.so`，无需硬编码
+- 解压 AAR → 删除不需要的 .so → 重新打包
+- 只保留 `libmycurl.so`，排除所有传递依赖的 .so
+
 ### 4.2 Prefab 模块配置
 
 #### 4.2.1 模块依赖关系
@@ -320,12 +419,60 @@ prefab/
 ```
 
 ### 5.2 App 集成
+
+#### 5.2.1 依赖配置
+在 App 模块的 `build.gradle` 中添加依赖：
 ```groovy
-// app/build.gradle
 dependencies {
-    implementation 'com.thirdlib:thirdpartylib:1.0.0'  // 提供 curl
-    implementation 'com.thirdlib:mycurl:1.0.0'         // 提供 mycurl
+    implementation 'com.thirdlib:thirdpartylib:1.0.0'  // 提供 curl、ssl、crypto、z 等
+    implementation 'com.thirdlib:mycurl:1.0.0'         // 提供 mycurl 封装
 }
+```
+
+#### 5.2.2 CMake 配置
+在 App 模块的 `CMakeLists.txt` 中引入 Prefab 模块：
+```cmake
+find_package(thirdpartylib REQUIRED CONFIG)
+find_package(mycurl REQUIRED CONFIG)
+
+target_link_libraries(app
+    thirdpartylib::thirdpartylib
+    mycurl::mycurl
+)
+```
+
+#### 5.2.3 C++ 使用示例
+```cpp
+#include <mycurl.h>
+
+void testMycurl() {
+    mycurl::MyCurl client;
+
+    // HTTP GET
+    auto response = client.get("https://httpbin.org/get");
+    if (response.code == 200) {
+        // 成功
+    }
+
+    // HTTP POST
+    response = client.post("https://httpbin.org/post", "{\"key\":\"value\"}");
+    if (response.code == 200) {
+        // 成功
+    }
+}
+```
+
+#### 5.2.4 构建验证
+```bash
+# 1. 确保 lib 和 mycurl 已发布到本地仓库
+./gradlew :lib:publish
+./gradlew :mycurl:publish
+
+# 2. 构建 App
+./gradlew :app:assembleDebug
+
+# 3. 验证 APK 中的 .so 文件
+unzip -l app/build/outputs/apk/debug/app-debug.apk | grep "\.so"
 ```
 
 ## 6. 验收标准
@@ -345,10 +492,79 @@ dependencies {
 | prefab/modules/curl/ 存在 | ❌ 不应存在 |
 
 ### 6.3 App 集成验收
-- [ ] App 能同时引入 thirdpartylib 和 mycurl
-- [ ] App CMakeLists 正确 find_package
-- [ ] App 编译时能找到 curl 头文件
-- [ ] App 运行时 GET/POST 正常
+
+#### 6.3.1 依赖配置验证
+| 检查项 | 预期 | 实际 |
+|--------|------|------|
+| App build.gradle 依赖 thirdpartylib | ✅ | |
+| App build.gradle 依赖 mycurl | ✅ | |
+| App CMakeLists.txt find_package thirdpartylib | ✅ | |
+| App CMakeLists.txt find_package mycurl | ✅ | |
+| App CMakeLists.txt 正确 target_link_libraries | ✅ | |
+
+#### 6.3.2 APK .so 文件验证
+检查 APK 中每个 .so 文件只出现一次：
+
+```bash
+unzip -l app/build/outputs/apk/debug/app-debug.apk | grep "\.so"
+```
+
+**预期结果**：
+```
+lib/arm64-v8a/libapp.so            ✅ App 自身
+lib/arm64-v8a/libcurl.so           ✅ 来自 thirdpartylib（仅一份）
+lib/arm64-v8a/libmycurl.so         ✅ 来自 mycurl
+lib/arm64-v8a/libssl.so            ✅ 来自 thirdpartylib（仅一份）
+lib/arm64-v8a/libcrypto.so         ✅ 来自 thirdpartylib（仅一份）
+lib/arm64-v8a/libz.so              ✅ 来自 thirdpartylib（仅一份）
+lib/arm64-v8a/libthirdpartylib.so  ✅ 来自 thirdpartylib
+lib/arm64-v8a/libc++_shared.so    ✅ C++ 标准库（仅一份）
+```
+
+**验证要点**：
+- mycurl AAR 中**不包含** libcurl.so（通过 AAR 后处理已排除）
+- libcurl.so 只来自 thirdpartylib AAR
+- libmycurl.so 来自 mycurl AAR
+- 所有 .so 文件无重复
+
+#### 6.3.3 AAR 结构验证（mycurl）
+```bash
+unzip -l mycurl/build/outputs/aar/mycurl-release.aar | grep "\.so"
+```
+
+**预期结果**：
+```
+jni/arm64-v8a/libmycurl.so           ✅ 保留
+jni/armeabi-v7a/libmycurl.so         ✅ 保留
+jni/arm64-v8a/libcurl.so             ❌ 不应存在
+jni/arm64-v8a/libssl.so              ❌ 不应存在
+jni/arm64-v8a/libcrypto.so           ❌ 不应存在
+```
+
+#### 6.3.4 Prefab 结构验证（mycurl）
+```bash
+unzip -l mycurl/build/outputs/aar/mycurl-release.aar | grep "prefab"
+```
+
+**预期结果**：
+```
+prefab/modules/mycurl/include/mycurl.h     ✅ 头文件
+prefab/modules/mycurl/libs/android.arm64-v8a/libmycurl.so  ✅ 库
+prefab/modules/mycurl/module.json          ✅ 模块配置
+prefab/prefab.json                       ✅ 包配置
+```
+
+**关键点**：
+- Prefab 中**不包含** curl 相关模块
+- curl 由 thirdpartylib 的 Prefab 提供
+
+#### 6.3.5 运行时验证（需要网络权限）
+| 测试项 | 预期结果 |
+|--------|----------|
+| App 启动正常 | ✅ 无崩溃 |
+| HTTP GET 请求 | ✅ 返回 HTTP 200 |
+| HTTP POST 请求 | ✅ 返回 HTTP 200 |
+| 错误处理 | ✅ 网络错误可捕获 |
 
 ## 7. 风险与注意事项
 
@@ -395,13 +611,13 @@ ${project}/
 │   └── ...
 │
 ├── mycurl/                                 # 新建模块（不使用 Conan）
-│   ├── build.gradle                        # 模块构建配置（依赖 lib，不使用 Conan）
+│   ├── build.gradle                        # 模块构建配置（AGP 内置 prefab）
 │   ├── CMakeLists.txt                      # CMake 配置（使用 thirdpartylib::curl）
 │   ├── src/main/
 │   │   ├── cpp/
 │   │   │   ├── mycurl.h
 │   │   │   └── mycurl.cpp
-│   │   └── prefab/                        # 动态生成
+│   │   └── prefab/                        # 动态生成（AGP 自动）
 │   └── mycurl-publish.gradle              # 发布配置
 │
 ├── app/                                    # 测试模块
