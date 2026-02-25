@@ -50,7 +50,7 @@ android {
 }
 
 dependencies {
-    // 引入thirdpartylib包（包含thirdpartylib和zlib两个prefab模块）
+    // 引入thirdpartylib包（包含thirdpartylib、zlib、minizip、bzip2等prefab模块）
     implementation 'com.thirdlib:thirdpartylib:1.0.0'
     implementation 'com.thirdlib:mycurl:1.0.0'
 

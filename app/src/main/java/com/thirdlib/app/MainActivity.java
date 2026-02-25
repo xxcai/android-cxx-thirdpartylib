@@ -39,6 +39,10 @@ public class MainActivity extends Activity {
     // mycurl 封装测试
     private native String nativeTestMycurlGet();
     private native String nativeTestMycurlPost();
+    // minizip 测试
+    private native String nativeTestMinizip(String dir);
+    // bzip2 测试
+    private native String nativeTestBzip2();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -65,6 +69,8 @@ public class MainActivity extends Activity {
         testItems.add(new TestItem("Test nlohmann_json", this::testNlohmann));
         testItems.add(new TestItem("Test spdlog", this::testSpdlog));
         testItems.add(new TestItem("Test fmt", this::testFmt));
+        testItems.add(new TestItem("Test minizip", this::testMinizip));
+        testItems.add(new TestItem("Test bzip2", this::testBzip2));
 
         // 设置 RecyclerView
         RecyclerView recyclerView = findViewById(R.id.recycler_view);
@@ -208,6 +214,32 @@ public class MainActivity extends Activity {
     private void testMycurlPost() {
         try {
             String result = nativeTestMycurlPost();
+            logResult(result);
+            Log.i(TAG, result);
+        } catch (Exception e) {
+            String msg = "Error: " + e.getMessage();
+            logResult(msg);
+            Log.e(TAG, msg);
+        }
+    }
+
+    // 测试 minizip
+    private void testMinizip() {
+        try {
+            String result = nativeTestMinizip(getCacheDir().getAbsolutePath());
+            logResult(result);
+            Log.i(TAG, result);
+        } catch (Exception e) {
+            String msg = "Error: " + e.getMessage();
+            logResult(msg);
+            Log.e(TAG, msg);
+        }
+    }
+
+    // 测试 bzip2
+    private void testBzip2() {
+        try {
+            String result = nativeTestBzip2();
             logResult(result);
             Log.i(TAG, result);
         } catch (Exception e) {

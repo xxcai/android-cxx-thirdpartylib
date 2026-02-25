@@ -6,6 +6,8 @@
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 #include <fmt/core.h>
+#include <minizip/zip.h>
+#include <bzlib.h>
 #include "thirdparty_lib.h"
 
 // mycurl 封装测试
@@ -180,6 +182,62 @@ Java_com_thirdlib_app_MainActivity_nativeTestMycurlPost(JNIEnv *env, jobject thi
     }
 
     return env->NewStringUTF(result.c_str());
+}
+
+// 测试 minizip 压缩功能 - 使用 app cache 目录
+JNIEXPORT jstring JNICALL
+Java_com_thirdlib_app_MainActivity_nativeTestMinizip(JNIEnv *env, jobject thiz, jstring dir) {
+    const char* dirPath = env->GetStringUTFChars(dir, nullptr);
+    std::string zipPath = std::string(dirPath) + "/test.zip";
+    env->ReleaseStringUTFChars(dir, dirPath);
+
+    // 创建 ZIP 文件
+    zipFile zf = zipOpen64(zipPath.c_str(), 0);
+    if (!zf) {
+        return env->NewStringUTF("minizip:create_failed");
+    }
+
+    const char* content = "Hello from minizip! This is test content.";
+    int contentLen = strlen(content);
+
+    // 创建 ZIP 条目
+    zip_fileinfo zi = {};
+    int err = zipOpenNewFileInZip64(zf, "test.txt", &zi, nullptr, 0, nullptr, 0, nullptr, Z_DEFLATED, Z_DEFAULT_COMPRESSION, 1);
+    if (err == ZIP_OK) {
+        err = zipWriteInFileInZip(zf, content, contentLen);
+    }
+    zipCloseFileInZip(zf);
+    zipClose(zf, nullptr);
+
+    if (err == ZIP_OK) {
+        return env->NewStringUTF("minizip:success");
+    } else {
+        return env->NewStringUTF(("minizip:error:" + std::to_string(err)).c_str());
+    }
+}
+
+// 测试 bzip2 压缩功能
+JNIEXPORT jstring JNICALL
+Java_com_thirdlib_app_MainActivity_nativeTestBzip2(JNIEnv *env, jobject thiz) {
+    const char* inputStr = "Hello from bzip2! This is test content for bzip2 compression.";
+    unsigned int inputLen = strlen(inputStr);
+
+    // bzip2 需要 1% + 600 字节的空间，使用更大缓冲区
+    unsigned int destLen = inputLen + 1000;
+    char* destBuffer = new char[destLen];
+
+    // bzip2 压缩
+    int result = BZ2_bzBuffToBuffCompress(destBuffer, &destLen, (char*)inputStr, inputLen, 9, 0, 30);
+
+    jstring output;
+    if (result == BZ_OK) {
+        output = env->NewStringUTF(("bzip2:success:" + std::to_string(destLen) + " bytes").c_str());
+    } else {
+        output = env->NewStringUTF(("bzip2:error:" + std::to_string(result)).c_str());
+    }
+
+    delete[] destBuffer;
+    return output;
 }
 
 }
