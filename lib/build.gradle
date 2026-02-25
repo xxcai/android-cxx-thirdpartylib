@@ -35,6 +35,7 @@ android {
                 cppFlags '-v'
                 arguments "-DANDROID_STL=c++_shared"
                 arguments("-DCMAKE_TOOLCHAIN_FILE=${rootProject.projectDir}/lib/conan_android_toolchain.cmake")
+                arguments "-DCMAKE_BUILD_TYPE=Release"
             }
         }
     }
