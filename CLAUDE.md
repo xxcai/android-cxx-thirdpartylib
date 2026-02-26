@@ -1,176 +1,128 @@
-# Project Overview
+# CLAUDE.md
 
-**Project Name:** android-cxx-thirdpartylib
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-**Description:**
-这是一个Android的Library Demo工程，聚合工程中用到的零散Native组件，对外提供统一能力。
-1. 通过Conan下载指定版本的组件（包含头文件和移动端的二进制）
-2. 打包成aar产物，使用prefab机制，发布到maven远程仓
+## Project Overview
 
-## Tech Stack
+这是一个 Android Native Library 聚合工程，通过 Conan 管理 C++ 依赖，使用 Prefab 机制打包成 AAR 发布到 Maven。
 
-- **Language:** Java + C++
-- **Build System:** Gradle + AGP + Prefab + CMake + Conan 2.x
-- **Min SDK:** 26
-- **Target SDK:** 31
-- **NDK Version:** 26.3.11579264
-- **Compile SDK Version:** 34
-- **Gradle Version:** 8.12.1
-- **AGP Version:** 8.3.2
-- **JDK Version:** 21
+### 技术栈
 
-# Project Structure
+- **Build**: Gradle 8.12.1 + AGP 8.3.2
+- **Native**: CMake 3.22.1 + NDK 26.3.11579264
+- **依赖管理**: Conan 2.x
+- **Min SDK**: 26 | **Target SDK**: 31 | **Compile SDK**: 34
+- **JDK**: 21
+
+## 模块结构
 
 ```
-android-cxx-thirdpartylib/
-├── lib/                                    # 发布模块
-│   ├── build.gradle                        # Groovy语法，Library构建脚本
-│   ├── CMakeLists.txt                      # CMake构建脚本
-│   ├── conanfile.py                        # Conan依赖配置 (2.x语法)
-│   ├── conan_android.toolchain.cmake       # Conan生成的Android工具链
-│   ├── android.profile                     # Conan Android编译配置
-│   └── src/main/
-│       ├── java/com/thirdlib/thirdpartylib/
-│       │   └── ThirdpartyLib.java         # Java接口
-│       ├── cpp/
-│       │   ├── native-lib.cpp              # Native实现
-│       │   └── include/                    # 头文件目录
-│       └── prefab/                         # Prefab配置 (动态生成)
-├── app/                                    # 测试模块
-│   ├── build.gradle
-│   └── src/main/
-│       ├── java/com/example/app/
-│       │   └── MainActivity.java           # 测试入口
-│       └── AndroidManifest.xml
-├── build.gradle                            # 根构建脚本
-├── settings.gradle
-├── gradle.properties
-└── .gitignore
+lib/           # 主模块：Conan 管理依赖，打包成 Prefab AAR
+mycurl/        # 封装模块：使用 Prefab，清理传递依赖的 .so
+mylog/         # 头文件库模块：纯头文件，使用 prefab-plugin 的 headerOnly 模式
+app/           # 测试模块：验证 Native 库集成
+prefab-plugin/ # 自定义 Gradle 插件：桥接 Conan 与 Prefab
 ```
 
-## Module Description
+## 常用构建命令
 
-### lib 模块
-发布的Android Library模块，包含：
-- **Conan依赖管理**: zlib, openssl, libcurl, nlohmann_json
-- **CMake构建**: 集成Conan下载的Native库，使用现代CMake find_package方式
-- **Prefab打包**: 动态生成带Prefab模块的AAR产物，支持Prefab Package 2格式
-
-### app 模块
-测试模块，用于验证lib模块的集成：
-- 依赖lib模块
-- 测试Prefab引入的Native库功能
-
-## Implementation Steps
-
-### 1. Gradle 配置
-- 根目录 `build.gradle`: 定义buildScript依赖和全局配置
-- `lib/build.gradle`:
-  - 应用 `com.android.library` + `maven-publish` 插件
-  - 配置 Prefab 动态生成 (Prefab Package 2)
-  - 配置 CMake 路径和ABI过滤 (arm64-v8a)
-  - 配置 Conan 依赖收集和 Prefab 模块生成
-  - Maven 发布到本地仓库
-
-### 2. Conan 配置
-`lib/conanfile.py`:
-```python
-from conan import ConanFile
-from conan.tools.cmake import cmake_layout
-
-class ThirdpartyLibConan(ConanFile):
-    settings = "os", "compiler", "build_type", "arch"
-    generators = ["CMakeDeps", "CMakeToolchain"]
-    options = {"shared": [True, False]}
-    default_options = {"shared": True}
-    requires = "zlib/1.3.1", "openssl/3.6.1", "libcurl/8.1.2", "nlohmann_json/3.11.3"
-
-    def layout(self):
-        cmake_layout(self)
-```
-
-### 3. CMake 构建脚本
-`lib/CMakeLists.txt`:
-```cmake
-cmake_minimum_required(VERSION 3.22.1)
-project(thirdpartylib)
-
-add_library(thirdpartylib SHARED src/main/cpp/native-lib.cpp)
-
-find_package(ZLIB REQUIRED CONFIG)
-find_package(OpenSSL REQUIRED CONFIG)
-find_package(CURL REQUIRED CONFIG)
-
-target_link_libraries(thirdpartylib
-    ZLIB::ZLIB
-    OpenSSL::Crypto
-    OpenSSL::SSL
-    CURL::libcurl
-)
-```
-
-### 4. Prefab 配置 (动态生成)
-Prefab 模块在构建时动态生成，不使用静态 modules.json。
-
-生成的Prefab模块结构：
-```
-prefab/
-├── prefab.json                              # Prefab Package 2 配置
-└── modules/
-    ├── zlib/                                # 二进制库模块 (结构同)
-    │   ├── module.json
-    │   ├── include/
-    │   └── libs/android.arm64-v8a/
-    │       ├── libz.so
-    │       └── abi.json
-    ├── ssl/                                  # 二进制库模块 (结构同zlib)
-    ├── crypto/                               # 二进制库模块 (结构同zlib)
-    ├── curl/                                 # 二进制库模块 (结构同zlib)
-    ├── nlohmann_json/                        # 纯头文件库模块 (无libs目录)
-    │   ├── module.json
-    │   └── include/
-    │       └── json.hpp
-    └── thirdpartylib/                        # 主模块 (结构同zlib)
-        ├── module.json
-        ├── include/
-        └── libs/android.arm64-v8a/
-            ├── libthirdpartylib.so
-            └── abi.json
-```
-
-> **说明**:
-> - 二进制库模块 (zlib/ssl/crypto/curl/thirdpartylib): 包含 `module.json`、`include/` 目录、`libs/android.<abi>/` 目录（包含 `.so/.a` 库文件和 `abi.json`）
-> - 纯头文件库模块 (nlohmann_json): 仅有 `module.json` 和 `include/` 目录，无 `libs/` 目录
-
-### 5. 构建流程
 ```bash
-# 1. 安装Conan依赖
-cd lib
-conan install . --profile android.profile -s build_type=Release -s arch=armv8 --build missing
+# 安装 Conan 依赖（首次或依赖更新时）
+cd lib && conan install . --profile android.profile -s build_type=Release -s arch=armv8 --build missing
 
-# 2. 执行Gradle构建
-cd ..
-./gradlew :lib:assembleRelease    # 构建lib模块 (自动注入Prefab)
-./gradlew :app:assembleDebug      # 构建app测试模块
+# 构建 lib 模块（场景1：Conan 注入 Prefab）
+./gradlew :lib:assembleRelease
 
-# 3. 发布到本地Maven仓库
+# 构建 mycurl 模块（场景2：清理传递依赖）
+./gradlew :mycurl:assembleRelease
+
+# 构建 mylog 模块（场景3：头文件库）
+./gradlew :mylog:assembleRelease
+
+# 构建 app 测试模块
+./gradlew :app:assembleDebug
+
+# 发布到本地 Maven 仓库
 ./gradlew :lib:publish
+
+# 查看 AAR 内容
+unzip -l lib/build/outputs/aar/lib-release.aar | grep -E "prefab|\.so"
+
+# 查看 APK 中的 .so
+unzip -l app/build/outputs/apk/debug/app-debug.apk | grep "\.so"
 ```
 
-# Resources
+## 核心概念
 
-- [Android NDK Documentation](https://developer.android.com/ndk)
-- [Prefab](https://google.github.io/prefab/)
-- [Prefab in AGP](https://developer.android.com/build/native-dependencies?hl=zh-cn&agpversion=4.1&buildsystem=cmake)
-- [CMake Documentation](https://cmake.org/documentation/)
-- [Conan](https://docs.conan.io/)
-- [Conan 2.x Migration Guide](https://docs.conan.io/en/latest/migration.html)
+### 场景 1：Conan 注入 Prefab (lib 模块)
+- `injectConanPrefab = true` 开启
+- Conan 自动下载并打包 zlib, openssl, libcurl, nlohmann_json 等依赖
+- 生成多模块 Prefab AAR
 
-# 规则
-1. 禁止为了通过测试为特殊场景硬编码
-2. 禁止通过`rm`清理项目外的gradle缓存，必要情况用`--refresh-dependencies`刷新
-3. 禁止擅自删除`conan`的缓存，必要情况下需要申请，并且说明原因
-4. 必须得到授权，才能调整组件库版本
-5. 禁止修改我的构建工具链版本，包括不限于JDK、GRADLE、AGP
-6. 小步修改，多进行验证，验证成功后，再执行下一步
-7. Gradle使用JDK21进行构建
+### 场景 2：清理传递依赖 (mycurl 模块)
+- `cleanTransitiveJniLibs = true` 开启
+- 仅保留本模块的 .so，清理传递依赖
+- 使用 AGP 内置 Prefab
+
+### 场景 3：头文件库 (mylog 模块)
+- `headerOnly = true` 开启
+- 纯头文件库，无需 native 构建，不生成 .so
+- 自动生成 Prefab 配置并注入 AAR
+
+### prefab-plugin 自定义插件
+位于 `prefab-plugin/src/main/groovy/com/thirdlib/prefab/`，包含：
+- `ConanInstallTask`: 执行 conan install
+- `CollectPackagesTask`: 收集 Conan 包路径
+- `GenerateModulesTask`: 生成 Prefab 模块结构
+- `InjectAarTask`: 将 Prefab 注入 AAR
+- `CleanJniLibsTask`: 清理传递依赖的 .so
+
+## 关键配置
+
+### lib/build.gradle
+```groovy
+conanPrefab {
+    libraryName = 'thirdpartylib'
+    conanfile = 'conanfile.py'
+    profile = 'android.profile'
+    abis = ['arm64-v8a', 'armeabi-v7a']
+    injectConanPrefab = true
+}
+```
+
+### lib/CMakeLists.txt
+使用 Conan 生成的 find_package 集成 Native 库。
+
+### mylog/build.gradle (头文件库模式)
+```groovy
+conanPrefab {
+    libraryName = 'mylog'
+    headerOnly = true
+    headerDir = 'src/main/cpp'
+    libraryVersion = '1.0.0'
+}
+```
+
+### mylog 使用方式
+```cpp
+// 头文件库，使用 spdlog rotating_file_sink
+#include <mylog.h>
+
+// 初始化，需要传入日志目录
+mylog::init("MyLogTag", "/data/data/com.example/files/logs");
+
+// 设置日志级别
+mylog::setLevel(mylog::Level::debug);
+
+// 使用日志
+mylog::info("Hello {}", "world");
+```
+- 日志文件路径: `{logDir}/mylog.log`
+- 自动轮转: 单文件 10MB，保留 3 个文件
+
+## 重要规则
+
+1. 禁止修改构建工具链版本（JDK、Gradle、AGP、NDK）
+2. 禁止擅自删除 Conan 缓存
+3. 必须得到授权才能调整组件库版本
+4. 小步修改，多验证再进行下一步
