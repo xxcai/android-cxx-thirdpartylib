@@ -43,6 +43,8 @@ public class MainActivity extends Activity {
     private native String nativeTestMinizip(String dir);
     // bzip2 测试
     private native String nativeTestBzip2();
+    // mylog 测试
+    private native String nativeTestMylog(String logDir);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -71,6 +73,7 @@ public class MainActivity extends Activity {
         testItems.add(new TestItem("Test fmt", this::testFmt));
         testItems.add(new TestItem("Test minizip", this::testMinizip));
         testItems.add(new TestItem("Test bzip2", this::testBzip2));
+        testItems.add(new TestItem("Test mylog", this::testMylog));
 
         // 设置 RecyclerView
         RecyclerView recyclerView = findViewById(R.id.recycler_view);
@@ -240,6 +243,20 @@ public class MainActivity extends Activity {
     private void testBzip2() {
         try {
             String result = nativeTestBzip2();
+            logResult(result);
+            Log.i(TAG, result);
+        } catch (Exception e) {
+            String msg = "Error: " + e.getMessage();
+            logResult(msg);
+            Log.e(TAG, msg);
+        }
+    }
+
+    // 测试 mylog
+    private void testMylog() {
+        try {
+            String logDir = getFilesDir().getAbsolutePath() + "/logs";
+            String result = nativeTestMylog(logDir);
             logResult(result);
             Log.i(TAG, result);
         } catch (Exception e) {

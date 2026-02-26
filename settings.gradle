@@ -21,4 +21,5 @@ dependencyResolutionManagement {
 rootProject.name = "android-cxx-thirdpartylib"
 include ':lib'
 include ':mycurl'
+include ':mylog'
 include ':app'

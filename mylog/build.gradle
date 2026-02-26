@@ -1,0 +1,60 @@
+plugins {
+    id 'com.android.library'
+    id 'maven-publish'
+    id 'com.thirdlib.prefab'
+}
+
+android {
+    namespace 'com.thirdlib.mylog'
+    compileSdk rootProject.ext.compileSdk
+
+    defaultConfig {
+        minSdk rootProject.ext.minSdk
+        targetSdk rootProject.ext.targetSdk
+        ndkVersion rootProject.ext.ndkVersion
+
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_STL=c++_shared"
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    buildFeatures {
+        prefab true
+        prefabPublishing true
+    }
+
+    prefab {
+        mylog {
+            headers = "src/main/cpp"
+            libraryName = "mylog"
+        }
+    }
+
+    // 空的 native 构建配置，用于触发 AGP 生成 Prefab 结构
+    externalNativeBuild {
+        cmake {
+            path "CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
+}
+
+dependencies {
+    // mylog 编译时使用 lib 的 Prefab 获取 spdlog 和 fmt
+    implementation 'com.thirdlib:thirdpartylib:1.0.0'
+}
+
+// Maven 发布配置
+apply from: 'mylog-publish.gradle'

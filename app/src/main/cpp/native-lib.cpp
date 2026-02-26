@@ -13,6 +13,9 @@
 // mycurl 封装测试
 #include <mycurl.h>
 
+// mylog 测试
+#include <mylog.h>
+
 extern "C" {
 
 JNIEXPORT jint JNICALL
@@ -238,6 +241,34 @@ Java_com_thirdlib_app_MainActivity_nativeTestBzip2(JNIEnv *env, jobject thiz) {
 
     delete[] destBuffer;
     return output;
+}
+
+// 测试 mylog 封装 - 使用简洁 API
+JNIEXPORT jstring JNICALL
+Java_com_thirdlib_app_MainActivity_nativeTestMylog(JNIEnv *env, jobject thiz, jstring logDir) {
+    // 获取日志目录
+    const char *logDirStr = env->GetStringUTFChars(logDir, nullptr);
+    std::string logDirStrCpp(logDirStr);
+    env->ReleaseStringUTFChars(logDir, logDirStr);
+
+    // 初始化 mylog
+    mylog::init("MyLogTest", logDirStrCpp);
+
+    // 设置日志级别
+    mylog::setLevel(mylog::Level::debug);
+
+    // 使用简洁 API 测试各日志级别
+    mylog::trace("This is a trace message from mylog");
+    mylog::debug("This is a debug message from mylog");
+    mylog::info("This is an info message from mylog");
+    mylog::warn("This is a warning message from mylog");
+    mylog::error("This is an error message from mylog");
+    mylog::critical("This is a critical message from mylog");
+
+    // 测试格式化
+    mylog::info("Formatted info: value={}, name={}", 42, "test");
+
+    return env->NewStringUTF("mylog_success");
 }
 
 }

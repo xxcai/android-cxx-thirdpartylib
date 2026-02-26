@@ -4,6 +4,7 @@ project(app)
 # 引入 Prefab 依赖
 find_package(thirdpartylib REQUIRED CONFIG)  # 提供 curl、ssl、crypto、z 等
 find_package(mycurl REQUIRED CONFIG)        # 提供 mycurl 封装
+find_package(mylog REQUIRED CONFIG)         # 提供 mylog 头文件库
 
 add_library(app SHARED native-lib.cpp)
 
@@ -11,4 +12,5 @@ add_library(app SHARED native-lib.cpp)
 target_link_libraries(app
     thirdpartylib::thirdpartylib  # 或直接使用 thirdpartylib::curl
     mycurl::mycurl               # mycurl 封装层
+    mylog::mylog                # mylog 头文件库（自动链接 spdlog/fmt）
 )

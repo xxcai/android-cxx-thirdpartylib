@@ -1,0 +1,36 @@
+publishing {
+    publications {
+        release(MavenPublication) {
+            // 头文件库：手动配置 artifact
+            artifact("$buildDir/outputs/aar/${project.name}-release.aar")
+
+            groupId = 'com.thirdlib'
+            artifactId = 'mylog'
+            version = '1.0.0'
+
+            pom {
+                name = 'mylog'
+                description = 'Simple logging wrapper based on spdlog (header-only)'
+                licenses {
+                    license {
+                        name = 'MIT'
+                        url = 'https://opensource.org/licenses/MIT'
+                    }
+                }
+                developers {
+                    developer {
+                        id = 'developer'
+                        name = 'Developer'
+                        email = 'developer@example.com'
+                    }
+                }
+            }
+        }
+    }
+
+    repositories {
+        maven {
+            url = uri("${rootDir}/local-maven-repo")
+        }
+    }
+}
