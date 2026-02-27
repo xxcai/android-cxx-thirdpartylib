@@ -112,9 +112,14 @@ class GenerateModulesTask extends DefaultTask {
 
     /**
      * 解析 conanfile.py 获取依赖列表
+     * 支持 Python 多行列表格式：
+     * requires = ["pkg1/1.0",
+     *     "pkg2/2.0",
+     *     "pkg3/3.0"]
      */
     List<String> parseConanfilePy(File conanfile) {
         def deps = []
+        boolean inRequires = false
 
         if (!conanfile.exists()) {
             logger.warn ">> Conanfile not found: ${conanfile}"
@@ -123,22 +128,54 @@ class GenerateModulesTask extends DefaultTask {
 
         conanfile.eachLine { line ->
             def trimmed = line.trim()
-            if (trimmed.startsWith('requires =')) {
-                def match = (trimmed =~ /requires\s*=\s*(.+)/)
+
+            // 检测 requires 开始
+            if (!inRequires && trimmed.startsWith('requires')) {
+                // 处理 requires = [...] 或 requires = [... 的情况
+                def match = (trimmed =~ /^requires\s*=\s*\[/)
                 if (match.find()) {
-                    def depsStr = match.group(1)
-                    depsStr.split(',').each { dep ->
-                        def cleaned = dep.trim().replaceAll('"', '').replaceAll("'", '')
-                        def pkg = cleaned.split('/')[0]?.trim()
-                        if (pkg && !deps.contains(pkg)) {
-                            deps << pkg
-                        }
-                    }
+                    inRequires = true
+                    // 提取第一行中的依赖（如果有的话，在 [ 后面）
+                    def firstLineDeps = trimmed.replaceAll(/^requires\s*=\s*\[/, '')
+                    parseDepsFromLine(firstLineDeps, deps)
                 }
+            } else if (inRequires) {
+                // 在 requires 块内，继续解析
+                // 检查是否遇到结束符 ]
+                def lineToParse = trimmed
+                if (trimmed.contains(']')) {
+                    inRequires = false
+                    // 只取 ] 之前的内容
+                    lineToParse = trimmed.substring(0, trimmed.indexOf(']'))
+                }
+                parseDepsFromLine(lineToParse, deps)
             }
         }
 
         return deps
+    }
+
+    /**
+     * 从一行中解析依赖包名
+     * 处理格式: "pkg/1.0", "pkg2/2.0"
+     */
+    void parseDepsFromLine(String line, List<String> deps) {
+        if (!line) return
+
+        // 分割多个依赖（用逗号分隔）
+        line.split(',').each { dep ->
+            def cleaned = dep.trim()
+                    .replaceAll(/^["']/, '')  // 去掉开头引号
+                    .replaceAll(/["']$/, '')  // 去掉结尾引号和可能的逗号
+                    .trim()
+
+            if (cleaned.contains('/')) {
+                def pkg = cleaned.split('/')[0]?.trim()
+                if (pkg && !deps.contains(pkg)) {
+                    deps << pkg
+                }
+            }
+        }
     }
 
     /**

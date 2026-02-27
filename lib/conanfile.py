@@ -7,7 +7,15 @@ class ThirdpartyLibConan(ConanFile):
     generators = ["CMakeDeps", "CMakeToolchain"]
     options = {"shared": [True, False]}
     default_options = {"shared": True}
-    requires = "minizip/1.3.1", "zlib/1.3.1", "bzip2/1.0.8", "openssl/3.6.1", "libcurl/8.1.2", "nlohmann_json/3.11.3", "spdlog/1.15.1", "fmt/11.1.3"
+    requires = [
+        "minizip/1.3.1",
+        "zlib/1.3.1",
+        "bzip2/1.0.8",
+        "openssl/3.6.1",
+        "libcurl/8.1.2",
+        "nlohmann_json/3.11.3",
+        "spdlog/1.15.1", "fmt/11.1.3"
+    ]
 
     def configure(self):
         self.options["spdlog"].header_only = True
